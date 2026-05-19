@@ -1,0 +1,2220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Mailroom — Office Management</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
+<!-- Firebase -->
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, setDoc, getDocs, deleteDoc, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCB2DqEuipqXZp-XkMezblTOxrfRnAt-tI",
+  authDomain: "mailroom-app-a8a1f.firebaseapp.com",
+  projectId: "mailroom-app-a8a1f",
+  storageBucket: "mailroom-app-a8a1f.firebasestorage.app",
+  messagingSenderId: "698496737126",
+  appId: "1:698496737126:web:9728df69835c840e92f2a7",
+  measurementId: "G-S4P8ZBTD22"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+const provider = new GoogleAuthProvider();
+
+// Expose to global scope so non-module functions can call them
+window._db = db;
+window._auth = auth;
+window._provider = provider;
+window._fbFns = { collection, doc, onSnapshot, addDoc, updateDoc, setDoc, getDocs, deleteDoc, query, orderBy, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider };
+
+// ── AUTH STATE LISTENER ──────────────────────────────────────────
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    // Signed in — check if admin
+    const adminEmails = ['admin@mailroom.app'];
+    if (adminEmails.includes(user.email)) {
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('app').style.display = 'none';
+      window._isAdmin = true;
+      await window.initFirestoreListeners();
+      openAdminPanel();
+      return;
+    }
+    // Regular staff — load their profile from Firestore or create one
+    window._firebaseUser = user;
+    await window.loadUserProfile(user);
+  } else {
+    // Not signed in — show login
+    window._firebaseUser = null;
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('admin-screen').classList.remove('open');
+    document.getElementById('login-screen').style.display = 'flex';
+  }
+});
+
+// ── FIRESTORE LISTENERS ─────────────────────────────────────────
+window.initFirestoreListeners = async function() {
+  const { collection, onSnapshot, query, orderBy } = window._fbFns;
+
+  // Listen to packages in real-time
+  const pkgsQuery = query(collection(db, 'packages'), orderBy('createdAt', 'desc'));
+  onSnapshot(pkgsQuery, (snap) => {
+    packages = snap.docs.map(d => ({ ...d.data(), _docId: d.id }));
+    renderAll();
+    updateBadges();
+    if (window._isAdmin) renderAdminOverview();
+  });
+
+  // Listen to locations in real-time
+  const locSnap = await getDocs(collection(db, 'settings'));
+  const locDoc = locSnap.docs.find(d => d.id === 'locations');
+  if (locDoc && locDoc.data().list && locDoc.data().list.length > 0) {
+    LOCATIONS = locDoc.data().list;
+  } else {
+    // First time — seed locations to Firestore
+    await setDoc(doc(db, 'settings', 'locations'), { list: LOCATIONS });
+  }
+
+  onSnapshot(doc(db, 'settings', 'locations'), (snap) => {
+    if (snap.exists() && snap.data().list) {
+      LOCATIONS = snap.data().list;
+      populatePkgLocSelect();
+      populateLocSelect();
+      if (window._isAdmin) renderAdminLocations();
+    }
+  });
+};
+
+// ── SAVE LOCATIONS TO FIRESTORE ──────────────────────────────────
+window.saveLocationsToFirestore = async function() {
+  const { doc, setDoc } = window._fbFns;
+  await setDoc(doc(db, 'settings', 'locations'), { list: LOCATIONS });
+};
+
+// ── SAVE PACKAGE TO FIRESTORE ────────────────────────────────────
+window.savePackageToFirestore = async function(pkg) {
+  const { collection, addDoc } = window._fbFns;
+  const pkgData = { ...pkg, createdAt: new Date().toISOString() };
+  delete pkgData.id; // Firestore generates its own ID
+  const ref = await addDoc(collection(db, 'packages'), pkgData);
+  return ref.id;
+};
+
+// ── UPDATE PACKAGE IN FIRESTORE ──────────────────────────────────
+window.updatePackageInFirestore = async function(pkg, fields) {
+  if (!pkg._docId) return;
+  const { doc, updateDoc } = window._fbFns;
+  await updateDoc(doc(db, 'packages', pkg._docId), fields);
+};
+
+// ── LOAD USER PROFILE ────────────────────────────────────────────
+window.loadUserProfile = async function(fbUser) {
+  const { doc, getDocs, collection, setDoc } = window._fbFns;
+  // Check if user profile exists in Firestore
+  const usersSnap = await getDocs(collection(db, 'users'));
+  let profile = usersSnap.docs.find(d => d.data().email === fbUser.email);
+
+  if (!profile) {
+    // New user — create profile with first available location as default
+    const defaultLoc = LOCATIONS[0] || 'Martin Place';
+    const nameParts = fbUser.displayName ? fbUser.displayName.split(' ') : ['User'];
+    const initials = nameParts.map(p => p[0]).join('').slice(0,2).toUpperCase();
+    const newProfile = {
+      email: fbUser.email,
+      name: fbUser.displayName || fbUser.email,
+      initials,
+      location: defaultLoc,
+      role: 'Mailroom Staff'
+    };
+    await setDoc(doc(db, 'users', fbUser.uid), newProfile);
+    window._userProfile = newProfile;
+  } else {
+    window._userProfile = profile.data();
+  }
+
+  currentUser = window._userProfile;
+  viewLocation = currentUser.location;
+
+  // Show app
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('user-avatar').textContent = currentUser.initials;
+  document.getElementById('profile-avatar-lg').textContent = currentUser.initials;
+  document.getElementById('profile-name').textContent = currentUser.name;
+  document.getElementById('profile-role').textContent = currentUser.role + ' · ' + currentUser.location;
+
+  await window.initFirestoreListeners();
+  populateLocSheet();
+  populatePkgLocSelect();
+  updateLocLabel();
+};
+</script>
+<style>
+:root {
+  --bg: #F7F6F3;
+  --surface: #FFFFFF;
+  --surface2: #F0EEE9;
+  --border: rgba(0,0,0,0.09);
+  --border-med: rgba(0,0,0,0.14);
+  --text: #1A1917;
+  --text2: #6B6960;
+  --text3: #9E9B93;
+  --accent: #1A1917;
+  --blue: #2563EB;
+  --blue-bg: #EFF4FF;
+  --blue-text: #1D4ED8;
+  --green: #16A34A;
+  --green-bg: #F0FDF4;
+  --green-text: #15803D;
+  --amber: #D97706;
+  --amber-bg: #FFFBEB;
+  --amber-text: #B45309;
+  --red: #DC2626;
+  --red-bg: #FEF2F2;
+  --red-text: #B91C1C;
+  --purple: #7C3AED;
+  --purple-bg: #F5F3FF;
+  --purple-text: #6D28D9;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-lg: 14px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-serif; color: var(--text); font-size: 15px; }
+
+/* ── SHELL ── */
+.shell { display: flex; flex-direction: column; height: 100vh; max-width: 430px; margin: 0 auto; background: var(--bg); position: relative; overflow: hidden; }
+
+/* ── TOPBAR ── */
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 16px 10px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; }
+.topbar-left { display: flex; flex-direction: column; }
+.topbar-title { font-size: 16px; font-weight: 600; color: var(--text); letter-spacing: -0.2px; }
+.topbar-loc { font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 4px; margin-top: 1px; cursor: pointer; }
+.topbar-loc i { font-size: 13px; }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0; }
+.notif-btn { position: relative; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border-med); background: var(--surface); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.notif-btn i { font-size: 18px; color: var(--text2); }
+.notif-dot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); border: 2px solid var(--surface); display: none; }
+.notif-dot.on { display: block; }
+
+/* ── SCROLL AREA ── */
+.scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.scroll::-webkit-scrollbar { display: none; }
+
+/* ── NAV ── */
+.nav { background: var(--surface); border-top: 1px solid var(--border); display: flex; flex-shrink: 0; padding-bottom: env(safe-area-inset-bottom, 0); }
+.nav-btn { flex: 1; padding: 10px 4px 8px; font-size: 10.5px; color: var(--text3); background: none; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; border-top: 2px solid transparent; position: relative; font-family: 'DM Sans', sans-serif; font-weight: 500; letter-spacing: 0.01em; transition: color .15s; }
+.nav-btn i { font-size: 22px; }
+.nav-btn.active { color: var(--text); border-top-color: var(--text); }
+.nav-dot { position: absolute; top: 8px; right: calc(50% - 16px); width: 7px; height: 7px; border-radius: 50%; background: var(--red); border: 1.5px solid var(--surface); display: none; }
+.nav-dot.on { display: block; }
+
+/* ── PAGES ── */
+.page { display: none; padding: 14px 14px 80px; }
+.page.active { display: block; }
+
+/* ── CARDS & LISTS ── */
+.card { background: var(--surface); border-radius: var(--radius-lg); border: 1px solid var(--border); margin-bottom: 10px; overflow: hidden; }
+.card-pad { padding: 14px; }
+.section-label { font-size: 11px; font-weight: 600; color: var(--text3); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 8px; margin-top: 4px; }
+
+/* ── STAT ROW ── */
+.stat-row { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-bottom: 14px; }
+.stat-card { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 12px 14px; }
+.stat-label { font-size: 11px; color: var(--text3); margin-bottom: 4px; font-weight: 500; }
+.stat-num { font-size: 26px; font-weight: 600; color: var(--text); font-family: 'DM Mono', monospace; letter-spacing: -1px; line-height: 1; }
+.stat-num.red { color: var(--red); }
+
+/* ── PKG CARDS ── */
+.pkg-card { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 11px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.pkg-card:hover { border-color: var(--border-med); box-shadow: var(--shadow); }
+.pkg-card.urgent { border-left: 3px solid var(--red); }
+.pkg-icon { width: 40px; height: 40px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 19px; flex-shrink: 0; }
+.pkg-icon.blue { background: var(--blue-bg); color: var(--blue); }
+.pkg-icon.green { background: var(--green-bg); color: var(--green); }
+.pkg-icon.gray { background: var(--surface2); color: var(--text2); }
+.pkg-icon.red { background: var(--red-bg); color: var(--red); }
+.pkg-icon.amber { background: var(--amber-bg); color: var(--amber); }
+.pkg-info { flex: 1; min-width: 0; }
+.pkg-name { font-size: 14px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkg-meta { font-size: 12px; color: var(--text2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkg-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+
+/* ── BADGES ── */
+.badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; padding: 2px 8px; border-radius: 99px; font-weight: 500; white-space: nowrap; }
+.badge i { font-size: 11px; }
+.badge.blue { background: var(--blue-bg); color: var(--blue-text); }
+.badge.green { background: var(--green-bg); color: var(--green-text); }
+.badge.amber { background: var(--amber-bg); color: var(--amber-text); }
+.badge.red { background: var(--red-bg); color: var(--red-text); }
+.badge.gray { background: var(--surface2); color: var(--text2); }
+.badge.purple { background: var(--purple-bg); color: var(--purple-text); }
+
+/* ── ALERT BANNER ── */
+.alert-banner { background: var(--red-bg); border: 1px solid #FECACA; border-radius: var(--radius); padding: 11px 13px; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; cursor: pointer; }
+.alert-banner i { font-size: 20px; color: var(--red); flex-shrink: 0; }
+.alert-banner-text { font-size: 13px; color: var(--red-text); font-weight: 500; }
+
+/* ── FORMS ── */
+.form-group { margin-bottom: 13px; }
+.form-group label { display: block; font-size: 12px; font-weight: 500; color: var(--text2); margin-bottom: 5px; }
+.form-group input, .form-group select { width: 100%; font-size: 14px; padding: 9px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border-med); background: var(--surface); color: var(--text); font-family: 'DM Sans', sans-serif; outline: none; transition: border-color .15s; }
+.form-group input:focus, .form-group select:focus { border-color: var(--accent); }
+.scan-box { border: 1.5px dashed var(--border-med); border-radius: var(--radius); padding: 16px; text-align: center; color: var(--text2); font-size: 13px; margin-bottom: 13px; cursor: pointer; transition: background .15s; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.scan-box:hover { background: var(--surface2); }
+.scan-box i { font-size: 22px; color: var(--text3); }
+.scan-box-label { text-align: left; }
+.scan-box-title { font-size: 13px; font-weight: 500; color: var(--text); }
+.scan-box-sub { font-size: 11px; color: var(--text3); margin-top: 1px; }
+
+/* ── CAMERA SCANNER OVERLAY ── */
+.scanner-overlay { position: fixed; inset: 0; background: #000; z-index: 300; display: none; flex-direction: column; }
+.scanner-overlay.open { display: flex; }
+.scanner-topbar { display: flex; align-items: center; justify-content: space-between; padding: 16px; background: rgba(0,0,0,0.6); flex-shrink: 0; }
+.scanner-topbar-title { color: #fff; font-size: 15px; font-weight: 600; }
+.scanner-close { background: rgba(255,255,255,0.15); border: none; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; font-size: 20px; }
+.scanner-viewport { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+#scanner-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.scanner-ui { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; }
+.scanner-frame { width: 260px; height: 160px; position: relative; }
+.scanner-corner { position: absolute; width: 24px; height: 24px; border-color: #fff; border-style: solid; }
+.scanner-corner.tl { top: 0; left: 0; border-width: 3px 0 0 3px; border-radius: 4px 0 0 0; }
+.scanner-corner.tr { top: 0; right: 0; border-width: 3px 3px 0 0; border-radius: 0 4px 0 0; }
+.scanner-corner.bl { bottom: 0; left: 0; border-width: 0 0 3px 3px; border-radius: 0 0 0 4px; }
+.scanner-corner.br { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-radius: 0 0 4px 0; }
+.scanner-line { position: absolute; left: 4px; right: 4px; height: 2px; background: linear-gradient(90deg, transparent, #fff, transparent); top: 0; animation: scanline 2s ease-in-out infinite; }
+@keyframes scanline { 0%,100% { top: 8px; opacity: 0.6; } 50% { top: 144px; opacity: 1; } }
+.scanner-hint { color: rgba(255,255,255,0.7); font-size: 13px; margin-top: 18px; text-align: center; }
+.scanner-bottom { background: rgba(0,0,0,0.7); padding: 20px 24px; flex-shrink: 0; }
+.scanner-manual { width: 100%; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); border-radius: var(--radius-sm); padding: 10px 12px; color: #fff; font-size: 14px; font-family: 'DM Sans', sans-serif; outline: none; text-align: center; letter-spacing: 0.5px; }
+.scanner-manual::placeholder { color: rgba(255,255,255,0.4); }
+.scanner-manual-label { color: rgba(255,255,255,0.5); font-size: 11px; text-align: center; margin-bottom: 8px; }
+.scanner-demo-btn { width: 100%; margin-top: 10px; padding: 11px; background: #fff; color: #000; border: none; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; cursor: pointer; font-family: 'DM Sans', sans-serif; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.scanner-demo-btn i { font-size: 18px; }
+
+/* ── SCAN SUCCESS FLASH ── */
+.scan-success { position: absolute; inset: 0; background: rgba(255,255,255,0.25); z-index: 10; display: none; }
+.scan-success.flash { display: block; animation: flashin 0.35s ease forwards; }
+@keyframes flashin { 0% { opacity: 1; } 100% { opacity: 0; } }
+.btn { width: 100%; padding: 11px; border-radius: var(--radius-sm); font-size: 15px; font-weight: 600; cursor: pointer; font-family: 'DM Sans', sans-serif; border: none; transition: opacity .15s, transform .1s; }
+.btn:active { transform: scale(0.98); }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border-med); margin-top: 8px; }
+.btn.danger { background: var(--red-bg); color: var(--red-text); border: 1px solid #FECACA; margin-top: 8px; }
+
+/* ── SF SEARCH ── */
+.sf-search-wrap { position: relative; margin-bottom: 13px; }
+.sf-search-wrap i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 17px; color: var(--text3); pointer-events: none; }
+.sf-search-wrap input { padding-left: 34px; }
+.sf-results { background: var(--surface); border: 1px solid var(--border-med); border-radius: var(--radius-sm); margin-top: 4px; overflow: hidden; display: none; }
+.sf-results.open { display: block; }
+.sf-item { padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+.sf-item:last-child { border-bottom: none; }
+.sf-item:hover { background: var(--surface2); }
+.sf-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--text2); flex-shrink: 0; }
+.sf-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.sf-sub { font-size: 11px; color: var(--text2); }
+.sf-badge { margin-left: auto; }
+
+/* ── EMAIL PREVIEW ── */
+.email-preview { background: var(--surface2); border-radius: var(--radius-sm); border: 1px solid var(--border); padding: 12px; font-size: 12px; color: var(--text2); line-height: 1.7; margin-top: 10px; }
+.email-preview strong { color: var(--text); }
+.email-link { display: inline-block; color: var(--blue); text-decoration: underline; cursor: pointer; margin: 1px 0; }
+
+/* ── DETAIL ── */
+.back-btn { background: none; border: none; color: var(--text2); font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 4px; margin-bottom: 14px; padding: 0; font-family: 'DM Sans', sans-serif; font-weight: 500; }
+.detail-table { width: 100%; font-size: 13px; }
+.detail-table tr td { padding: 7px 0; border-bottom: 1px solid var(--border); }
+.detail-table tr:last-child td { border-bottom: none; }
+.detail-table td:first-child { color: var(--text2); width: 42%; }
+.detail-table td:last-child { color: var(--text); font-weight: 500; text-align: right; }
+.action-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-top: 6px; }
+.action-btn { background: var(--surface); border: 1px solid var(--border-med); border-radius: var(--radius-sm); padding: 12px 8px; font-size: 13px; font-weight: 500; color: var(--text); cursor: pointer; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; font-family: 'DM Sans', sans-serif; transition: background .15s, border-color .15s; }
+.action-btn i { font-size: 22px; color: var(--text2); }
+.action-btn:hover { background: var(--surface2); border-color: var(--border-med); }
+.completed-action { background: var(--green-bg); border: 1px solid #BBF7D0; border-radius: var(--radius-sm); padding: 11px 13px; display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--green-text); font-weight: 500; margin-bottom: 10px; }
+.completed-action i { font-size: 19px; flex-shrink: 0; }
+
+/* ── LOGIN SCREEN ── */
+.login-screen { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; z-index: 100; }
+.login-logo { font-size: 28px; font-weight: 700; color: var(--text); letter-spacing: -1px; margin-bottom: 6px; }
+.login-sub { font-size: 14px; color: var(--text2); margin-bottom: 36px; }
+.login-card { background: var(--surface); border-radius: var(--radius-lg); border: 1px solid var(--border); padding: 24px; width: 100%; max-width: 360px; }
+.login-card h2 { font-size: 17px; font-weight: 600; margin-bottom: 18px; }
+.login-error { background: var(--red-bg); color: var(--red-text); font-size: 13px; border-radius: var(--radius-sm); padding: 9px 12px; margin-bottom: 12px; display: none; }
+.login-error.show { display: block; }
+.demo-hint { margin-top: 14px; font-size: 12px; color: var(--text3); text-align: center; line-height: 1.6; }
+
+/* ── LOCATION PICKER ── */
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 50; display: none; align-items: flex-end; }
+.overlay.open { display: flex; }
+.sheet { background: var(--surface); border-radius: 20px 20px 0 0; width: 100%; max-height: 75vh; overflow-y: auto; padding: 20px 0 env(safe-area-inset-bottom,16px); }
+.sheet-handle { width: 36px; height: 4px; background: var(--border-med); border-radius: 99px; margin: 0 auto 16px; }
+.sheet-title { font-size: 15px; font-weight: 600; padding: 0 16px 12px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.loc-item { padding: 13px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; font-size: 14px; border-bottom: 1px solid var(--border); }
+.loc-item:last-child { border-bottom: none; }
+.loc-item:hover { background: var(--surface2); }
+.loc-item.active { color: var(--blue); font-weight: 500; }
+.loc-item i { font-size: 18px; }
+
+/* ── TOAST ── */
+.toast-wrap { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 200; pointer-events: none; }
+.toast { background: var(--text); color: #fff; padding: 10px 18px; border-radius: 99px; font-size: 13px; font-weight: 500; white-space: nowrap; opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s; }
+.toast.show { opacity: 1; transform: translateY(0); }
+
+/* ── SEARCH & FILTER ── */
+.search-bar-wrap { position: relative; margin-bottom: 10px; }
+.search-bar-wrap i.search-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); font-size: 17px; color: var(--text3); pointer-events: none; }
+.search-bar { width: 100%; font-size: 14px; padding: 9px 36px 9px 34px; border-radius: var(--radius); border: 1px solid var(--border-med); background: var(--surface); color: var(--text); font-family: 'DM Sans', sans-serif; outline: none; transition: border-color .15s; }
+.search-bar:focus { border-color: var(--accent); }
+.search-clear { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text3); cursor: pointer; font-size: 18px; display: none; padding: 0; line-height: 1; }
+.search-clear.show { display: block; }
+.filter-row { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.filter-row::-webkit-scrollbar { display: none; }
+.filter-chip { flex-shrink: 0; padding: 5px 12px; border-radius: 99px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-med); background: var(--surface); color: var(--text2); cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; font-family: 'DM Sans', sans-serif; }
+.filter-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.results-meta { font-size: 12px; color: var(--text3); margin-bottom: 10px; }
+.highlight { background: #FEF08A; border-radius: 2px; padding: 0 1px; }
+.hist-item { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 12px 14px; margin-bottom: 8px; }
+.hist-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 5px; }
+.hist-name { font-size: 14px; font-weight: 500; color: var(--text); }
+.hist-time { font-size: 11px; color: var(--text3); }
+.hist-meta { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+.hist-tags { display: flex; gap: 5px; flex-wrap: wrap; }
+
+/* ── EMPTY ── */
+.empty { text-align: center; padding: 36px 20px; color: var(--text3); font-size: 13px; }
+.empty i { font-size: 36px; display: block; margin-bottom: 10px; opacity: .35; }
+
+/* ── PROFILE SHEET ── */
+.profile-row { display: flex; align-items: center; gap: 12px; padding: 16px; border-bottom: 1px solid var(--border); }
+.profile-avatar-lg { width: 48px; height: 48px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 600; flex-shrink: 0; }
+.profile-name { font-size: 15px; font-weight: 600; color: var(--text); }
+.profile-role { font-size: 12px; color: var(--text2); }
+.sheet-btn { width: 100%; padding: 13px 16px; text-align: left; font-size: 14px; color: var(--text); background: none; border: none; border-bottom: 1px solid var(--border); cursor: pointer; font-family: 'DM Sans', sans-serif; display: flex; align-items: center; gap: 10px; }
+.sheet-btn i { font-size: 19px; color: var(--text2); }
+.sheet-btn:last-child { border-bottom: none; }
+.sheet-btn.red { color: var(--red); }
+.sheet-btn.red i { color: var(--red); }
+
+/* ── STAGING QUEUE ── */
+.staging-bar { background: var(--surface); border-top: 1px solid var(--border); padding: 10px 14px; flex-shrink: 0; display: none; }
+.staging-bar.show { display: block; }
+.staging-bar-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.staging-bar-label { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; }
+.staging-count { background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; }
+.staging-discard { font-size: 12px; color: var(--text3); background: none; border: none; cursor: pointer; font-family: 'DM Sans', sans-serif; }
+.staging-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; max-height: 120px; overflow-y: auto; }
+.staging-item { background: var(--surface2); border-radius: var(--radius-sm); padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
+.staging-item-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+.staging-item-icon.blue { background: var(--blue-bg); color: var(--blue); }
+.staging-item-icon.purple { background: var(--purple-bg); color: var(--purple); }
+.staging-item-info { flex: 1; min-width: 0; }
+.staging-item-name { font-size: 12px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.staging-item-meta { font-size: 11px; color: var(--text2); }
+.staging-item-remove { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; padding: 0; flex-shrink: 0; }
+.staging-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.staging-btn-scan { background: var(--surface2); border: 1px solid var(--border-med); border-radius: var(--radius-sm); padding: 10px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; font-family: 'DM Sans', sans-serif; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.staging-btn-scan i { font-size: 17px; }
+.staging-btn-send { background: var(--accent); border: none; border-radius: var(--radius-sm); padding: 10px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; font-family: 'DM Sans', sans-serif; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.staging-btn-send i { font-size: 17px; }
+
+/* ── SEND CONFIRM OVERLAY ── */
+.send-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 300; display: none; align-items: flex-end; }
+.send-overlay.open { display: flex; }
+.send-sheet { background: var(--surface); border-radius: 20px 20px 0 0; width: 100%; padding: 20px; padding-bottom: env(safe-area-inset-bottom, 20px); }
+.send-handle { width: 36px; height: 4px; background: var(--border-med); border-radius: 99px; margin: 0 auto 16px; }
+.send-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+.send-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
+.send-group { margin-bottom: 14px; }
+.send-group-label { font-size: 11px; font-weight: 600; color: var(--text3); letter-spacing: .05em; text-transform: uppercase; margin-bottom: 8px; }
+.send-recipient { background: var(--surface2); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 6px; display: flex; align-items: flex-start; gap: 10px; }
+.send-recipient:last-child { margin-bottom: 0; }
+.send-recip-icon { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0; margin-top: 1px; }
+.send-recip-info { flex: 1; min-width: 0; }
+.send-recip-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.send-recip-email { font-size: 11px; color: var(--text2); margin-top: 1px; }
+.send-recip-pkgs { font-size: 11px; color: var(--text3); margin-top: 3px; }
+.send-recip-type { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 99px; margin-top: 4px; display: inline-block; }
+.send-recip-type.ws { background: var(--surface); color: var(--text2); border: 1px solid var(--border-med); }
+.send-recip-type.vo { background: var(--purple-bg); color: var(--purple-text); }
+.send-final-btns { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; margin-top: 4px; }
+
+/* ── VO STATUS BADGES ── */
+.badge.awaiting-reply { background: #FFF7ED; color: #C2410C; }
+.badge.store { background: var(--green-bg); color: var(--green-text); }
+.badge.destroy { background: var(--red-bg); color: var(--red-text); }
+.badge.scan-email { background: var(--blue-bg); color: var(--blue-text); }
+.badge.forward { background: var(--purple-bg); color: var(--purple-text); }
+.sig-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 300; display: none; align-items: flex-end; }
+.sig-overlay.open { display: flex; }
+.sig-sheet { background: var(--surface); border-radius: 20px 20px 0 0; width: 100%; padding: 20px; padding-bottom: env(safe-area-inset-bottom, 20px); }
+.sig-handle { width: 36px; height: 4px; background: var(--border-med); border-radius: 99px; margin: 0 auto 16px; }
+.sig-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+.sig-sub { font-size: 12px; color: var(--text2); margin-bottom: 14px; }
+.sig-canvas-wrap { border: 1.5px solid var(--border-med); border-radius: var(--radius); background: #FAFAF9; position: relative; margin-bottom: 12px; overflow: hidden; }
+#sig-canvas { display: block; width: 100%; height: 160px; border-radius: var(--radius); cursor: crosshair; touch-action: none; }
+.sig-placeholder { position: absolute; bottom: 14px; left: 0; right: 0; text-align: center; font-size: 12px; color: var(--text3); pointer-events: none; transition: opacity .2s; }
+.sig-placeholder.hidden { opacity: 0; }
+.sig-line { position: absolute; bottom: 38px; left: 20px; right: 20px; height: 1px; background: var(--border-med); pointer-events: none; }
+.sig-row { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
+.sig-preview-card { background: var(--green-bg); border: 1px solid #BBF7D0; border-radius: var(--radius-sm); padding: 10px; display: none; margin-bottom: 10px; }
+.sig-preview-card.show { display: block; }
+.sig-preview-label { font-size: 11px; color: var(--green-text); font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
+.sig-preview-img { width: 100%; height: 48px; object-fit: contain; background: #fff; border-radius: 4px; border: 1px solid #BBF7D0; }
+
+/* ── REPORTING ── */
+.report-period { display: flex; gap: 6px; margin-bottom: 14px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.report-period::-webkit-scrollbar { display: none; }
+.period-chip { flex-shrink: 0; padding: 5px 14px; border-radius: 99px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-med); background: var(--surface); color: var(--text2); cursor: pointer; font-family: 'DM Sans', sans-serif; }
+.period-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.report-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-bottom: 14px; }
+.report-stat { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 13px; }
+.report-stat-num { font-size: 28px; font-weight: 600; color: var(--text); font-family: 'DM Mono', monospace; letter-spacing: -1px; line-height: 1; margin-bottom: 3px; }
+.report-stat-label { font-size: 11px; color: var(--text3); font-weight: 500; }
+.report-stat-sub { font-size: 11px; color: var(--text2); margin-top: 3px; }
+.chart-card { background: var(--surface); border-radius: var(--radius-lg); border: 1px solid var(--border); padding: 14px; margin-bottom: 10px; }
+.chart-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 14px; }
+.bar-chart { display: flex; align-items: flex-end; gap: 5px; height: 90px; margin-bottom: 8px; }
+.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; justify-content: flex-end; }
+.bar { width: 100%; border-radius: 4px 4px 0 0; min-height: 3px; }
+.bar.blue { background: var(--blue); }
+.bar.green { background: var(--green); }
+.bar.amber { background: var(--amber); }
+.bar.purple { background: var(--purple); }
+.bar-label { font-size: 9px; color: var(--text3); }
+.bar-val { font-size: 9px; font-weight: 600; color: var(--text2); }
+.donut-wrap { display: flex; align-items: center; gap: 16px; }
+.donut-legend { flex: 1; display: flex; flex-direction: column; gap: 9px; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.legend-label { color: var(--text2); flex: 1; }
+.legend-pct { font-size: 11px; color: var(--text3); }
+.legend-val { font-weight: 600; color: var(--text); font-family: 'DM Mono', monospace; }
+.rank-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.rank-row:last-child { border-bottom: none; }
+.rank-name { font-size: 13px; color: var(--text); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rank-bar-wrap { flex: 2; height: 6px; background: var(--surface2); border-radius: 99px; overflow: hidden; }
+.rank-bar-fill { height: 100%; border-radius: 99px; }
+.rank-count { font-size: 12px; font-weight: 600; color: var(--text2); font-family: 'DM Mono', monospace; min-width: 24px; text-align: right; }
+.avg-time-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.avg-time-row:last-child { border-bottom: none; }
+.avg-time-label { color: var(--text2); }
+.avg-time-val { font-weight: 600; color: var(--text); font-family: 'DM Mono', monospace; }
+/* ── ADMIN PANEL ── */
+.admin-screen { position: fixed; inset: 0; background: var(--bg); z-index: 200; display: none; flex-direction: column; max-width: 430px; margin: 0 auto; }
+.admin-screen.open { display: flex; }
+.admin-topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.admin-topbar-left { display: flex; align-items: center; gap: 10px; }
+.admin-badge { background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 99px; letter-spacing: .04em; }
+.admin-title { font-size: 16px; font-weight: 600; color: var(--text); }
+.admin-logout { background: none; border: none; font-size: 13px; color: var(--text2); cursor: pointer; display: flex; align-items: center; gap: 5px; font-family: 'DM Sans', sans-serif; }
+.admin-logout i { font-size: 17px; }
+.admin-scroll { flex: 1; overflow-y: auto; padding: 16px 14px 40px; }
+.admin-scroll::-webkit-scrollbar { display: none; }
+.admin-section { background: var(--surface); border-radius: var(--radius-lg); border: 1px solid var(--border); margin-bottom: 14px; overflow: hidden; }
+.admin-section-header { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.admin-section-title { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.admin-section-title i { font-size: 18px; color: var(--text2); }
+.admin-section-count { font-size: 12px; font-weight: 600; color: var(--text3); background: var(--surface2); padding: 2px 8px; border-radius: 99px; }
+.admin-loc-list { padding: 6px 0; max-height: 340px; overflow-y: auto; }
+.admin-loc-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); transition: background .12s; }
+.admin-loc-item:last-child { border-bottom: none; }
+.admin-loc-item:hover { background: var(--surface2); }
+.admin-loc-num { font-size: 11px; font-weight: 600; color: var(--text3); font-family: 'DM Mono', monospace; min-width: 22px; }
+.admin-loc-name { flex: 1; font-size: 14px; color: var(--text); }
+.admin-loc-name.editing { display: none; }
+.admin-loc-input { flex: 1; font-size: 14px; font-family: 'DM Sans', sans-serif; border: 1px solid var(--blue); border-radius: var(--radius-sm); padding: 4px 8px; color: var(--text); background: var(--surface); outline: none; display: none; }
+.admin-loc-input.editing { display: block; }
+.admin-loc-actions { display: flex; gap: 4px; }
+.admin-icon-btn { background: none; border: none; cursor: pointer; width: 30px; height: 30px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 17px; color: var(--text3); transition: background .12s, color .12s; }
+.admin-icon-btn:hover { background: var(--surface2); color: var(--text); }
+.admin-icon-btn.edit:hover { color: var(--blue); }
+.admin-icon-btn.save { color: var(--green); }
+.admin-icon-btn.save:hover { background: var(--green-bg); color: var(--green); }
+.admin-icon-btn.delete:hover { color: var(--red); background: var(--red-bg); }
+.admin-icon-btn.cancel:hover { color: var(--amber); }
+.admin-add-row { padding: 12px 16px; display: flex; gap: 8px; border-top: 1px solid var(--border); background: var(--surface2); }
+.admin-add-input { flex: 1; font-size: 14px; font-family: 'DM Sans', sans-serif; padding: 8px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border-med); background: var(--surface); color: var(--text); outline: none; transition: border-color .15s; }
+.admin-add-input:focus { border-color: var(--accent); }
+.admin-add-btn { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'DM Sans', sans-serif; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.admin-add-btn i { font-size: 16px; }
+.admin-info-card { margin: 0 16px 14px; background: var(--blue-bg); border: 1px solid #BFDBFE; border-radius: var(--radius-sm); padding: 11px 13px; font-size: 12px; color: var(--blue-text); line-height: 1.6; display: flex; gap: 9px; }
+.admin-info-card i { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+.admin-stat-row { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; padding: 14px 16px; }
+.admin-stat { text-align: center; }
+.admin-stat-num { font-size: 22px; font-weight: 600; font-family: 'DM Mono', monospace; color: var(--text); }
+.admin-stat-label { font-size: 11px; color: var(--text3); margin-top: 2px; }
+.admin-divider { height: 1px; background: var(--border); margin: 0 16px; }
+.delete-confirm { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 400; display: none; align-items: center; justify-content: center; padding: 24px; }
+.delete-confirm.open { display: flex; }
+.delete-confirm-card { background: var(--surface); border-radius: var(--radius-lg); padding: 20px; width: 100%; max-width: 320px; }
+.delete-confirm-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+.delete-confirm-body { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 18px; }
+.delete-confirm-body strong { color: var(--text); }
+.delete-confirm-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+</style>
+</head>
+<body>
+
+<!-- ADMIN PANEL -->
+<div class="admin-screen" id="admin-screen">
+  <div class="admin-topbar">
+    <div class="admin-topbar-left">
+      <span class="admin-badge">ADMIN</span>
+      <div class="admin-title">Settings</div>
+    </div>
+    <button class="admin-logout" onclick="doAdminLogout()">
+      <i class="ti ti-logout"></i> Sign out
+    </button>
+  </div>
+  <div class="admin-scroll">
+
+    <!-- Overview stats -->
+    <div class="admin-section" style="margin-top:4px">
+      <div class="admin-section-header">
+        <div class="admin-section-title"><i class="ti ti-layout-grid"></i>Overview</div>
+      </div>
+      <div class="admin-stat-row">
+        <div class="admin-stat">
+          <div class="admin-stat-num" id="admin-stat-locs">19</div>
+          <div class="admin-stat-label">Locations</div>
+        </div>
+        <div class="admin-stat">
+          <div class="admin-stat-num" id="admin-stat-staff">3</div>
+          <div class="admin-stat-label">Staff accounts</div>
+        </div>
+        <div class="admin-stat">
+          <div class="admin-stat-num" id="admin-stat-pkgs">8</div>
+          <div class="admin-stat-label">Active packages</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Location management -->
+    <div class="admin-section">
+      <div class="admin-section-header">
+        <div class="admin-section-title"><i class="ti ti-map-pin"></i>Office Locations</div>
+        <span class="admin-section-count" id="admin-loc-count">19 locations</span>
+      </div>
+      <div class="admin-info-card">
+        <i class="ti ti-info-circle"></i>
+        <div>Add, rename or remove office locations. Changes apply immediately across the entire app. Removing a location won't affect packages already logged there.</div>
+      </div>
+      <div class="admin-loc-list" id="admin-loc-list"></div>
+      <div class="admin-add-row">
+        <input class="admin-add-input" id="admin-new-loc" placeholder="New location name…" autocomplete="off"
+          onkeydown="if(event.key==='Enter') addLocation()"/>
+        <button class="admin-add-btn" onclick="addLocation()">
+          <i class="ti ti-plus"></i> Add
+        </button>
+      </div>
+    </div>
+
+    <!-- Staff accounts (read-only preview) -->
+    <div class="admin-section">
+      <div class="admin-section-header">
+        <div class="admin-section-title"><i class="ti ti-users"></i>Staff Accounts</div>
+        <span class="admin-section-count" id="admin-staff-count">3 accounts</span>
+      </div>
+      <div class="admin-info-card">
+        <i class="ti ti-info-circle"></i>
+        <div>Staff account management (add, remove, reset passwords) will be available once connected to Firebase authentication by your developer.</div>
+      </div>
+      <div id="admin-staff-list"></div>
+    </div>
+
+    <!-- Developer note -->
+    <div class="admin-section">
+      <div class="admin-section-header">
+        <div class="admin-section-title"><i class="ti ti-code"></i>Developer Notes</div>
+      </div>
+      <div style="padding:14px 16px;font-size:13px;color:var(--text2);line-height:1.7">
+        <div style="margin-bottom:10px"><strong style="color:var(--text)">Persistence:</strong> Location changes in this prototype are session-only. Connect Firebase Firestore to make them permanent and synced across all locations.</div>
+        <div style="margin-bottom:10px"><strong style="color:var(--text)">Salesforce sync:</strong> When a location is renamed, a Zapier zap should update the matching <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:12px">Office_Location__c</code> field in Salesforce.</div>
+        <div><strong style="color:var(--text)">Future admin features:</strong> Email template editor, notification preferences per location, Salesforce field mapping.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- DELETE CONFIRM DIALOG -->
+<div class="delete-confirm" id="delete-confirm">
+  <div class="delete-confirm-card">
+    <div class="delete-confirm-title">Remove location?</div>
+    <div class="delete-confirm-body" id="delete-confirm-body">Are you sure you want to remove <strong id="delete-loc-name"></strong>? This cannot be undone in this session.</div>
+    <div class="delete-confirm-btns">
+      <button class="btn secondary" style="margin-top:0" onclick="closeDeleteConfirm()">Cancel</button>
+      <button class="btn primary" style="margin-top:0;background:var(--red)" onclick="confirmDeleteLocation()">Remove</button>
+    </div>
+  </div>
+</div>
+
+<!-- LOGIN -->
+<div class="login-screen" id="login-screen">
+  <div class="login-logo">Mailroom</div>
+  <div class="login-sub">Office management platform</div>
+  <div class="login-card">
+    <h2>Sign in</h2>
+    <div class="login-error" id="login-error">Sign-in failed. Please try again.</div>
+
+    <!-- Google Sign-In (live) -->
+    <button class="btn primary" onclick="doGoogleLogin()" style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:16px">
+      <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#fff" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#fff" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#fff" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/><path fill="#fff" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+      Sign in with Google
+    </button>
+
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+      <span style="font-size:12px;color:var(--text3)">or use demo account</span>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+    </div>
+
+    <div class="form-group">
+      <label>Email address</label>
+      <input type="email" id="l-email" placeholder="you@company.com" autocomplete="email"/>
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="l-password" placeholder="••••••••" autocomplete="current-password"/>
+    </div>
+    <button class="btn secondary" style="margin-top:0" onclick="doLogin()">Sign in with demo account</button>
+    <div class="demo-hint">
+      <strong>Staff accounts:</strong><br>
+      sarah@mailroom.app / demo123 (Martin Place)<br>
+      james@mailroom.app / demo123 (Collins Street)<br>
+      priya@mailroom.app / demo123 (George Street)<br><br>
+      <strong>Admin account:</strong><br>
+      admin@mailroom.app / admin123
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div class="shell" id="app" style="display:none">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-title">Mailroom</div>
+      <div class="topbar-loc" onclick="openLocSheet()" id="topbar-loc">
+        <i class="ti ti-map-pin"></i><span id="loc-label">Loading…</span><i class="ti ti-chevron-down"></i>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="notif-btn" onclick="showPage('actions')">
+        <i class="ti ti-bell"></i>
+        <div class="notif-dot" id="notif-dot"></div>
+      </div>
+      <div class="avatar" id="user-avatar" onclick="openProfileSheet()"></div>
+    </div>
+  </div>
+
+  <div class="scroll" id="main-scroll">
+    <!-- DASHBOARD -->
+    <div class="page active" id="page-dashboard">
+      <div id="dash-alert"></div>
+      <div class="stat-row">
+        <div class="stat-card"><div class="stat-label">Awaiting pickup</div><div class="stat-num" id="s-waiting">0</div></div>
+        <div class="stat-card"><div class="stat-label">Action needed</div><div class="stat-num red" id="s-actions">0</div></div>
+        <div class="stat-card"><div class="stat-label">Collected today</div><div class="stat-num" id="s-collected">0</div></div>
+        <div class="stat-card"><div class="stat-label">This week</div><div class="stat-num" id="s-total">0</div></div>
+      </div>
+      <div class="section-label">Awaiting pickup</div>
+      <div id="dash-list"></div>
+    </div>
+
+    <!-- ACTIONS -->
+    <div class="page" id="page-actions">
+      <div class="section-label">Pending customer instructions</div>
+      <div id="actions-list"></div>
+    </div>
+
+    <!-- LOG NEW -->
+    <div class="page" id="page-add">
+      <div class="section-label">Log a new item</div>
+      <div class="card card-pad" id="add-form-card">
+        <div class="form-group">
+          <label>Type</label>
+          <select id="f-type"><option value="in">Incoming package</option><option value="out">Outgoing mail</option></select>
+        </div>
+
+        <div class="section-label" style="margin-top:4px">Search Salesforce for recipient</div>
+        <div class="sf-search-wrap">
+          <i class="ti ti-search"></i>
+          <input type="text" id="sf-search" placeholder="Start typing a name…" oninput="sfSearch(this.value)" autocomplete="off"/>
+          <div class="sf-results" id="sf-results"></div>
+        </div>
+
+        <div class="form-group">
+          <label>Recipient name</label>
+          <input type="text" id="f-recipient" placeholder="e.g. Sarah Johnson" oninput="updateVoPreview()"/>
+        </div>
+        <div class="form-group">
+          <label>Recipient email</label>
+          <input type="text" id="f-email" placeholder="e.g. sarah@company.com"/>
+        </div>
+        <div class="form-group">
+          <label>Customer type</label>
+          <select id="f-category" onchange="onCategoryChange()">
+            <option value="workspace">Workspace</option>
+            <option value="virtual">Virtual Office</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Office location</label>
+          <select id="f-pkg-location"></select>
+        </div>
+
+        <div class="scan-box" onclick="openScanner()">
+          <i class="ti ti-camera"></i>
+          <div class="scan-box-label">
+            <div class="scan-box-title">Scan package barcode</div>
+            <div class="scan-box-sub">Opens camera — tracking number auto-fills</div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Tracking number</label>
+          <input type="text" id="f-tracking" placeholder="e.g. 1Z999AA10123456784"/>
+        </div>
+        <div class="form-group">
+          <label>Carrier / sender</label>
+          <input type="text" id="f-sender" placeholder="e.g. FedEx, DHL, Australia Post" oninput="updateVoPreview()"/>
+        </div>
+        <div class="form-group">
+          <label>Storage location</label>
+          <input type="text" id="f-storage" placeholder="e.g. Shelf B3"/>
+        </div>
+        <div class="form-group">
+          <label>Notes (optional)</label>
+          <input type="text" id="f-notes" placeholder="e.g. Fragile, large box"/>
+        </div>
+
+        <div id="vo-preview-wrap" style="display:none">
+          <div class="section-label" style="margin-top:2px">Email preview — Virtual Office</div>
+          <div class="email-preview">
+            <strong>To:</strong> <span id="prev-email">[email]</span><br>
+            <strong>Subject:</strong> Package arrived — please advise<br><br>
+            Hi <strong id="prev-name">[Recipient]</strong>, a package has arrived from <strong id="prev-sender">[Carrier]</strong> at your office.<br><br>
+            Please choose one of the following actions:<br>
+            <span class="email-link">Keep / Store onsite</span><br>
+            <span class="email-link">Destroy</span><br>
+            <span class="email-link">Scan to email</span><br>
+            <span class="email-link">Forward</span>
+          </div>
+        </div>
+
+        <button class="btn primary" style="margin-top:14px" onclick="stagePackage()">
+          <i class="ti ti-plus" style="font-size:16px;vertical-align:-2px;margin-right:4px"></i>Add to batch
+        </button>
+      </div>
+    </div>
+
+    <!-- PACKAGES -->
+    <div class="page" id="page-packages">
+      <div class="search-bar-wrap">
+        <i class="ti ti-search search-icon"></i>
+        <input class="search-bar" id="pkg-search" type="text" placeholder="Search name, tracking, carrier…" oninput="onPkgSearch(this.value)" autocomplete="off"/>
+        <button class="search-clear" id="pkg-search-clear" onclick="clearPkgSearch()"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="filter-row" id="pkg-filter-row">
+        <button class="filter-chip active" onclick="setPkgFilter('all',this)">All</button>
+        <button class="filter-chip" onclick="setPkgFilter('waiting',this)">Awaiting pickup</button>
+        <button class="filter-chip" onclick="setPkgFilter('awaiting-reply',this)">Awaiting reply</button>
+        <button class="filter-chip" onclick="setPkgFilter('pending-action',this)">Action needed</button>
+        <button class="filter-chip" onclick="setPkgFilter('outgoing',this)">Outgoing</button>
+        <button class="filter-chip" onclick="setPkgFilter('workspace',this)">Workspace</button>
+        <button class="filter-chip" onclick="setPkgFilter('virtual',this)">Virtual Office</button>
+      </div>
+      <div class="results-meta" id="pkg-results-meta"></div>
+      <div id="pkg-results-list"></div>
+    </div>
+
+    <!-- HISTORY -->
+    <div class="page" id="page-history">
+      <div class="search-bar-wrap">
+        <i class="ti ti-search search-icon"></i>
+        <input class="search-bar" id="hist-search" type="text" placeholder="Search name, tracking, carrier…" oninput="onHistSearch(this.value)" autocomplete="off"/>
+        <button class="search-clear" id="hist-search-clear" onclick="clearHistSearch()"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="filter-row">
+        <button class="filter-chip active" onclick="setHistFilter('all',this)">All</button>
+        <button class="filter-chip" onclick="setHistFilter('workspace',this)">Workspace</button>
+        <button class="filter-chip" onclick="setHistFilter('virtual',this)">Virtual Office</button>
+        <button class="filter-chip" onclick="setHistFilter('action',this)">Had action</button>
+      </div>
+      <div class="results-meta" id="hist-results-meta"></div>
+      <div id="hist-list"></div>
+    </div>
+
+    <!-- REPORTS -->
+    <div class="page" id="page-reports">
+      <div class="report-period" id="report-period-row">
+        <button class="period-chip active" onclick="setReportPeriod('week',this)">This week</button>
+        <button class="period-chip" onclick="setReportPeriod('month',this)">This month</button>
+        <button class="period-chip" onclick="setReportPeriod('quarter',this)">This quarter</button>
+        <button class="period-chip" onclick="setReportPeriod('all',this)">All time</button>
+      </div>
+      <div class="report-grid" id="report-kpis"></div>
+      <div class="chart-card" id="report-volume-chart"></div>
+      <div class="chart-card" id="report-type-chart"></div>
+      <div class="chart-card" id="report-carrier-chart"></div>
+      <div class="chart-card" id="report-location-chart"></div>
+      <div class="chart-card" id="report-avgtime-chart"></div>
+    </div>
+
+    <!-- DETAIL -->
+    <div class="page" id="page-detail">
+      <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i> Back</button>
+      <div id="detail-content"></div>
+    </div>
+  </div>
+
+  <!-- STAGING BAR — sits above nav -->
+  <div class="staging-bar" id="staging-bar">
+    <div class="staging-bar-top">
+      <div class="staging-bar-label">
+        <i class="ti ti-stack" style="font-size:17px"></i>
+        Batch ready
+        <span class="staging-count" id="staging-count">0</span>
+      </div>
+      <button class="staging-discard" onclick="discardBatch()">Discard all</button>
+    </div>
+    <div class="staging-list" id="staging-list"></div>
+    <div class="staging-btns">
+      <button class="staging-btn-scan" onclick="showPage('add')">
+        <i class="ti ti-camera"></i> Scan more
+      </button>
+      <button class="staging-btn-send" onclick="openSendConfirm()">
+        <i class="ti ti-send"></i> Send notifications
+      </button>
+    </div>
+  </div>
+
+  <nav class="nav">
+    <button class="nav-btn active" id="nav-dashboard" onclick="showPage('dashboard')">
+      <i class="ti ti-home"></i>Home
+    </button>
+    <button class="nav-btn" id="nav-actions" onclick="showPage('actions')">
+      <i class="ti ti-bell"></i>Actions
+      <span class="nav-dot" id="nav-dot"></span>
+    </button>
+    <button class="nav-btn" id="nav-add" onclick="showPage('add')">
+      <i class="ti ti-plus"></i>Log new
+    </button>
+    <button class="nav-btn" id="nav-packages" onclick="showPage('packages')">
+      <i class="ti ti-package"></i>Packages
+    </button>
+    <button class="nav-btn" id="nav-history" onclick="showPage('history')">
+      <i class="ti ti-clock"></i>History
+    </button>
+    <button class="nav-btn" id="nav-reports" onclick="showPage('reports')">
+      <i class="ti ti-chart-bar"></i>Reports
+    </button>
+  </nav>
+</div>
+
+<!-- SEND CONFIRM OVERLAY -->
+<div class="send-overlay" id="send-overlay">
+  <div class="send-sheet">
+    <div class="send-handle"></div>
+    <div class="send-title" id="send-title">Send notifications</div>
+    <div class="send-sub" id="send-sub">Review before sending</div>
+    <div id="send-groups"></div>
+    <div class="send-final-btns">
+      <button class="btn secondary" style="margin-top:0" onclick="closeSendOverlay()">Cancel</button>
+      <button class="btn primary" style="margin-top:0" onclick="confirmSendAll()">
+        <i class="ti ti-send" style="font-size:15px;vertical-align:-2px;margin-right:4px"></i>Confirm & send all
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- SIGNATURE CAPTURE -->
+<div class="sig-overlay" id="sig-overlay">
+  <div class="sig-sheet">
+    <div class="sig-handle"></div>
+    <div class="sig-title" id="sig-title">Signature required</div>
+    <div class="sig-sub" id="sig-sub">Please sign below to confirm collection</div>
+    <div class="sig-canvas-wrap">
+      <canvas id="sig-canvas"></canvas>
+      <div class="sig-line"></div>
+      <div class="sig-placeholder" id="sig-placeholder">Sign here</div>
+    </div>
+    <div class="sig-row">
+      <button class="btn secondary" style="margin-top:0" onclick="clearSig()">Clear</button>
+      <button class="btn primary" style="margin-top:0" onclick="confirmSig()">Confirm collection</button>
+    </div>
+  </div>
+</div>
+
+<!-- CAMERA SCANNER -->
+<div class="scanner-overlay" id="scanner-overlay">
+  <div class="scanner-topbar">
+    <div class="scanner-topbar-title">Scan barcode</div>
+    <button class="scanner-close" onclick="closeScanner()"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="scanner-viewport">
+    <video id="scanner-video" autoplay playsinline muted></video>
+    <div class="scan-success" id="scan-success"></div>
+    <div class="scanner-ui">
+      <div class="scanner-frame">
+        <div class="scanner-corner tl"></div>
+        <div class="scanner-corner tr"></div>
+        <div class="scanner-corner bl"></div>
+        <div class="scanner-corner br"></div>
+        <div class="scanner-line"></div>
+      </div>
+      <div class="scanner-hint">Hold steady — align barcode inside the frame</div>
+    </div>
+  </div>
+  <div class="scanner-bottom">
+    <div class="scanner-manual-label">Or enter tracking number manually</div>
+    <input class="scanner-manual" id="scanner-manual-input" type="text" placeholder="e.g. 1Z999AA10123456784" autocomplete="off"/>
+    <button class="scanner-demo-btn" onclick="triggerDemoScan()">
+      <i class="ti ti-scan"></i> Simulate a successful scan
+    </button>
+  </div>
+</div>
+
+<!-- LOCATION SHEET -->
+<div class="overlay" id="loc-overlay" onclick="closeSheets()">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Select location to view</div>
+    <div id="loc-list"></div>
+  </div>
+</div>
+
+<!-- PROFILE SHEET -->
+<div class="overlay" id="profile-overlay" onclick="closeSheets()">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <div class="profile-row">
+      <div class="profile-avatar-lg" id="profile-avatar-lg"></div>
+      <div>
+        <div class="profile-name" id="profile-name"></div>
+        <div class="profile-role" id="profile-role"></div>
+      </div>
+    </div>
+    <button class="sheet-btn" onclick="closeSheets();openLocSheet()"><i class="ti ti-map-pin"></i> Change home location</button>
+    <button class="sheet-btn red" onclick="doLogout()"><i class="ti ti-logout"></i> Sign out</button>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast-wrap"><div class="toast" id="toast"></div></div>
+
+<script>
+// ── DATA ──────────────────────────────────────────────────────────
+let LOCATIONS = [
+  'Forum - Double Bay',
+  'Forum - Cremorne',
+  'Central House - Toorak',
+  'Central House - South Melbourne',
+  'George Street',
+  'Martin Place',
+  'York Street',
+  'Castlereagh Street',
+  'Surry Hills',
+  'Chippendale',
+  'Collins Street',
+  'QV',
+  'Wellington Street',
+  'Gipp Street',
+  'Richmond',
+  'Cremorne',
+  'South Yarra',
+  'Toorak Road',
+  'South Melbourne'
+];
+
+const USERS = [
+  { email:'sarah@mailroom.app', password:'demo123', name:'Sarah Chen', initials:'SC', location:'Martin Place', role:'Mailroom Manager' },
+  { email:'james@mailroom.app', password:'demo123', name:'James Wu', initials:'JW', location:'Collins Street', role:'Mailroom Staff' },
+  { email:'priya@mailroom.app', password:'demo123', name:'Priya Nair', initials:'PN', location:'George Street', role:'Mailroom Staff' }
+];
+
+const ADMIN_USER = { email:'admin@mailroom.app', password:'admin123', name:'Admin', role:'System Administrator' };
+
+const SF_CUSTOMERS = [
+  { id:'SF001', name:'Marcus Lee', email:'marcus@acmeco.com', phone:'+61 2 9001 1234', company:'Acme Co', type:'virtual', location:'Martin Place' },
+  { id:'SF002', name:'Jennifer Walsh', email:'jen.walsh@bluechip.com', phone:'+61 2 9001 5678', company:'Blue Chip Ltd', type:'workspace', location:'Martin Place' },
+  { id:'SF003', name:'Tom Baker', email:'tom.baker@startupx.io', phone:'+61 3 9001 2345', company:'Startup X', type:'virtual', location:'Collins Street' },
+  { id:'SF004', name:'Aisha Patel', email:'aisha@lawpartners.com', phone:'+61 3 9001 6789', company:'Law Partners', type:'workspace', location:'Collins Street' },
+  { id:'SF005', name:'David Nguyen', email:'d.nguyen@fintech.com', phone:'+61 7 9001 3456', company:'Fintech Pty', type:'virtual', location:'George Street' },
+  { id:'SF006', name:'Chloe Adams', email:'chloe@designstudio.com', phone:'+61 7 9001 7890', company:'Design Studio', type:'workspace', location:'George Street' },
+  { id:'SF007', name:'Ryan Mitchell', email:'ryan@globalops.com', phone:'+61 8 9001 4567', company:'Global Ops', type:'virtual', location:'York Street' },
+  { id:'SF008', name:'Sarah Johnson', email:'sarah.j@medgroup.com', phone:'+61 2 9001 8901', company:'Med Group', type:'workspace', location:'Forum - Double Bay' },
+  { id:'SF009', name:'Oliver Kim', email:'o.kim@consult.com', phone:'+61 3 9001 5678', company:'Kim Consulting', type:'virtual', location:'QV' },
+  { id:'SF010', name:'Emma Torres', email:'emma@propco.com', phone:'+61 2 9001 9012', company:'Prop Co', type:'workspace', location:'Surry Hills' },
+  { id:'SF011', name:'Liam Chen', email:'liam@techventures.com', phone:'+61 2 9001 0123', company:'Tech Ventures', type:'virtual', location:'Castlereagh Street' },
+  { id:'SF012', name:'Nina Sharma', email:'nina@creativehub.com', phone:'+61 7 9001 2222', company:'Creative Hub', type:'workspace', location:'Forum - Cremorne' }
+];
+
+const ACTION_LIST = ['Keep / Store onsite','Destroy','Scan to email','Forward'];
+const ACTION_ICONS = { 'Keep / Store onsite':'ti-building-warehouse','Destroy':'ti-trash','Scan to email':'ti-mail','Forward':'ti-send' };
+
+let packages = [
+  { id:1, type:'in', recipient:'Marcus Lee', email:'marcus@acmeco.com', company:'Acme Co', category:'virtual', pkgLocation:'Martin Place', sender:'FedEx', tracking:'FX394820183', storage:'Shelf A1', notes:'', date:'Today, 9:14 am', status:'awaiting-reply', action:null },
+  { id:2, type:'in', recipient:'Jennifer Walsh', email:'jen.walsh@bluechip.com', company:'Blue Chip Ltd', category:'workspace', pkgLocation:'Martin Place', sender:'DHL', tracking:'DHL9283746', storage:'Shelf A2', notes:'Fragile', date:'Today, 10:32 am', status:'waiting', action:null },
+  { id:3, type:'in', recipient:'Tom Baker', email:'tom.baker@startupx.io', company:'Startup X', category:'virtual', pkgLocation:'Collins Street', sender:'Australia Post', tracking:'AP77461029', storage:'Shelf B1', notes:'', date:'Today, 11:05 am', status:'pending-action', action:'Forward' },
+  { id:4, type:'in', recipient:'Aisha Patel', email:'aisha@lawpartners.com', company:'Law Partners', category:'workspace', pkgLocation:'Collins Street', sender:'UPS', tracking:'1Z999AA101234', storage:'Shelf B2', notes:'', date:'Yesterday, 3:22 pm', status:'collected', action:null },
+  { id:5, type:'in', recipient:'David Nguyen', email:'d.nguyen@fintech.com', company:'Fintech Pty', category:'virtual', pkgLocation:'George Street', sender:'FedEx', tracking:'FX103948271', storage:'', notes:'', date:'Yesterday, 4:50 pm', status:'collected', action:'Keep / Store onsite' },
+  { id:6, type:'out', recipient:'Finance Dept', email:'', company:'', category:'workspace', pkgLocation:'Martin Place', sender:'Australia Post', tracking:'AP99183847', storage:'Outbox tray', notes:'Registered mail', date:'Today, 8:45 am', status:'outgoing', action:null },
+  { id:7, type:'in', recipient:'Oliver Kim', email:'o.kim@consult.com', company:'Kim Consulting', category:'virtual', pkgLocation:'QV', sender:'DHL', tracking:'DHL8827461', storage:'Shelf C1', notes:'', date:'Today, 12:30 pm', status:'awaiting-reply', action:null },
+  { id:8, type:'in', recipient:'Ryan Mitchell', email:'ryan@globalops.com', company:'Global Ops', category:'virtual', pkgLocation:'York Street', sender:'StarTrack', tracking:'ST9918274', storage:'Shelf D2', notes:'', date:'Today, 1:15 pm', status:'pending-action', action:null }
+];
+let nextId = 9;
+
+let currentUser = null;
+let viewLocation = null;
+let prevPage = 'dashboard';
+
+// ── AUTH ──────────────────────────────────────────────────────────
+async function doGoogleLogin() {
+  try {
+    document.getElementById('login-error').classList.remove('show');
+    await window._fbFns.signInWithPopup(window._auth, window._provider);
+    // onAuthStateChanged handles the rest
+  } catch(e) {
+    document.getElementById('login-error').classList.add('show');
+    document.getElementById('login-error').textContent = 'Google sign-in failed. Make sure pop-ups are allowed.';
+  }
+}
+
+function doLogin() {
+  // Demo / admin fallback login (no Firebase needed)
+  const email = document.getElementById('l-email').value.trim().toLowerCase();
+  const pass = document.getElementById('l-password').value;
+  document.getElementById('login-error').classList.remove('show');
+
+  if (email === ADMIN_USER.email && pass === ADMIN_USER.password) {
+    document.getElementById('login-screen').style.display = 'none';
+    window._isAdmin = true;
+    openAdminPanel();
+    return;
+  }
+
+  const user = USERS.find(u => u.email === email && u.password === pass);
+  if (!user) { document.getElementById('login-error').classList.add('show'); document.getElementById('login-error').textContent = 'Incorrect email or password.'; return; }
+  currentUser = user;
+  viewLocation = user.location;
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('user-avatar').textContent = user.initials;
+  document.getElementById('profile-avatar-lg').textContent = user.initials;
+  document.getElementById('profile-name').textContent = user.name;
+  document.getElementById('profile-role').textContent = user.role + ' · ' + user.location;
+  populateLocSheet();
+  populatePkgLocSelect();
+  updateLocLabel();
+  renderAll();
+}
+
+async function doLogout() {
+  closeSheets();
+  if (window._firebaseUser) {
+    await window._fbFns.signOut(window._auth);
+  }
+  currentUser = null;
+  window._firebaseUser = null;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('l-email').value = '';
+  document.getElementById('l-password').value = '';
+}
+
+// ── LOCATIONS ─────────────────────────────────────────────────────
+function updateLocLabel() {
+  const label = viewLocation === currentUser.location ? viewLocation + ' (home)' : viewLocation;
+  document.getElementById('loc-label').textContent = label;
+}
+
+function populateLocSelect() {
+  const el = document.getElementById('loc-list');
+  el.innerHTML = ['All locations',...LOCATIONS].map(l => {
+    const active = l === viewLocation || (l==='All locations' && !viewLocation);
+    return `<div class="loc-item${active?' active':''}" onclick="selectLoc('${l}')">
+      ${l}${l===currentUser?.location?' <span style="font-size:11px;color:var(--text3)">(home)</span>':''}
+      ${active?'<i class="ti ti-check"></i>':''}
+    </div>`;
+  }).join('');
+}
+
+function populateLocSheet() { populateLocSelect(); }
+
+function populatePkgLocSelect() {
+  const el = document.getElementById('f-pkg-location');
+  el.innerHTML = LOCATIONS.map(l => `<option value="${l}"${l===currentUser.location?' selected':''}>${l}</option>`).join('');
+}
+
+function selectLoc(loc) {
+  viewLocation = loc === 'All locations' ? null : loc;
+  updateLocLabel();
+  closeSheets();
+  renderAll();
+}
+
+function openLocSheet() {
+  populateLocSelect();
+  document.getElementById('loc-overlay').classList.add('open');
+}
+
+function openProfileSheet() {
+  document.getElementById('profile-overlay').classList.add('open');
+}
+
+function closeSheets() {
+  document.getElementById('loc-overlay').classList.remove('open');
+  document.getElementById('profile-overlay').classList.remove('open');
+}
+
+// ── FILTERING ─────────────────────────────────────────────────────
+function filteredPkgs() {
+  if (!viewLocation) return packages;
+  return packages.filter(p => p.pkgLocation === viewLocation);
+}
+
+// ── RENDER ALL ────────────────────────────────────────────────────
+function renderAll() {
+  renderDashboard();
+  renderActions();
+  renderPackages();
+  renderHistory();
+  updateBadges();
+}
+
+function updateBadges() {
+  const n = filteredPkgs().filter(p => p.status === 'pending-action').length;
+  document.getElementById('notif-dot').className = 'notif-dot' + (n > 0 ? ' on' : '');
+  document.getElementById('nav-dot').className = 'nav-dot' + (n > 0 ? ' on' : '');
+}
+
+// ── DASHBOARD ─────────────────────────────────────────────────────
+function renderDashboard() {
+  const pkgs = filteredPkgs();
+  const waiting = pkgs.filter(p => p.status === 'waiting' || p.status === 'awaiting-reply');
+  const actions = pkgs.filter(p => p.status === 'pending-action');
+  const collected = pkgs.filter(p => p.status === 'collected' && p.date.startsWith('Today'));
+  document.getElementById('s-waiting').textContent = waiting.length;
+  document.getElementById('s-actions').textContent = actions.length;
+  document.getElementById('s-collected').textContent = collected.length;
+  document.getElementById('s-total').textContent = pkgs.length;
+
+  const alertEl = document.getElementById('dash-alert');
+  alertEl.innerHTML = actions.length > 0
+    ? `<div class="alert-banner" onclick="showPage('actions')"><i class="ti ti-alert-circle"></i><div class="alert-banner-text">${actions.length} Virtual Office package${actions.length>1?'s':''} need${actions.length===1?'s':''} your attention</div><i class="ti ti-chevron-right" style="margin-left:auto;color:var(--red)"></i></div>`
+    : '';
+
+  const el = document.getElementById('dash-list');
+  const dashWaiting = pkgs.filter(p => p.status === 'waiting');
+  const dashAwaiting = pkgs.filter(p => p.status === 'awaiting-reply');
+  let html = '';
+  if (dashWaiting.length) html += dashWaiting.map(pkgCard).join('');
+  if (dashAwaiting.length) {
+    html += `<div class="section-label" style="margin-top:${dashWaiting.length?'12px':'0'}">Awaiting customer reply</div>`;
+    html += dashAwaiting.map(pkgCard).join('');
+  }
+  el.innerHTML = html || empty('ti-inbox','No packages awaiting pickup');
+}
+
+// ── ACTIONS ───────────────────────────────────────────────────────
+function renderActions() {
+  const pkgs = filteredPkgs().filter(p => p.status === 'pending-action');
+  document.getElementById('actions-list').innerHTML = pkgs.length ? pkgs.map(pkgCard).join('') : empty('ti-circle-check','No pending actions — all clear');
+}
+
+// ── PACKAGES SEARCH & FILTER ──────────────────────────────────────
+let pkgSearchQuery = '';
+let pkgActiveFilter = 'all';
+
+function onPkgSearch(val) {
+  pkgSearchQuery = val.trim().toLowerCase();
+  document.getElementById('pkg-search-clear').className = 'search-clear' + (val ? ' show' : '');
+  renderPackages();
+}
+
+function clearPkgSearch() {
+  document.getElementById('pkg-search').value = '';
+  pkgSearchQuery = '';
+  document.getElementById('pkg-search-clear').className = 'search-clear';
+  renderPackages();
+}
+
+function setPkgFilter(filter, btn) {
+  pkgActiveFilter = filter;
+  document.querySelectorAll('#pkg-filter-row .filter-chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  renderPackages();
+}
+
+function applyPkgFilters(pkgs) {
+  let result = pkgs.filter(p => p.status !== 'collected');
+  if (pkgActiveFilter === 'waiting') result = result.filter(p => p.status === 'waiting');
+  else if (pkgActiveFilter === 'awaiting-reply') result = result.filter(p => p.status === 'awaiting-reply');
+  else if (pkgActiveFilter === 'pending-action') result = result.filter(p => p.status === 'pending-action' || p.status === 'awaiting-reply');
+  else if (pkgActiveFilter === 'outgoing') result = result.filter(p => p.status === 'outgoing');
+  else if (pkgActiveFilter === 'workspace') result = result.filter(p => p.category === 'workspace');
+  else if (pkgActiveFilter === 'virtual') result = result.filter(p => p.category === 'virtual');
+  if (pkgSearchQuery) {
+    result = result.filter(p =>
+      p.recipient.toLowerCase().includes(pkgSearchQuery) ||
+      (p.company||'').toLowerCase().includes(pkgSearchQuery) ||
+      p.tracking.toLowerCase().includes(pkgSearchQuery) ||
+      p.sender.toLowerCase().includes(pkgSearchQuery) ||
+      p.pkgLocation.toLowerCase().includes(pkgSearchQuery) ||
+      (p.notes||'').toLowerCase().includes(pkgSearchQuery)
+    );
+  }
+  return result;
+}
+
+function renderPackages() {
+  const base = filteredPkgs();
+  const result = applyPkgFilters(base);
+  const total = base.filter(p => p.status !== 'collected').length;
+  const meta = document.getElementById('pkg-results-meta');
+  meta.textContent = pkgSearchQuery || pkgActiveFilter !== 'all'
+    ? `${result.length} of ${total} package${total !== 1 ? 's' : ''}`
+    : '';
+  const el = document.getElementById('pkg-results-list');
+  el.innerHTML = result.length
+    ? result.map(p => pkgCard(p, pkgSearchQuery)).join('')
+    : `<div class="empty"><i class="ti ti-search"></i>${pkgSearchQuery ? 'No packages match "' + pkgSearchQuery + '"' : 'No packages'}</div>`;
+}
+
+// ── HISTORY SEARCH & FILTER ───────────────────────────────────────
+let histSearchQuery = '';
+let histActiveFilter = 'all';
+
+function onHistSearch(val) {
+  histSearchQuery = val.trim().toLowerCase();
+  document.getElementById('hist-search-clear').className = 'search-clear' + (val ? ' show' : '');
+  renderHistory();
+}
+
+function clearHistSearch() {
+  document.getElementById('hist-search').value = '';
+  histSearchQuery = '';
+  document.getElementById('hist-search-clear').className = 'search-clear';
+  renderHistory();
+}
+
+function setHistFilter(filter, btn) {
+  histActiveFilter = filter;
+  document.querySelectorAll('#page-history .filter-chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  renderHistory();
+}
+
+function hl(text, query) {
+  if (!query) return text;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return text;
+  return text.slice(0, idx) + '<span class="highlight">' + text.slice(idx, idx + query.length) + '</span>' + text.slice(idx + query.length);
+}
+
+function renderHistory() {
+  let pkgs = filteredPkgs().filter(p => p.status === 'collected');
+  const total = pkgs.length;
+  if (histActiveFilter === 'workspace') pkgs = pkgs.filter(p => p.category === 'workspace');
+  else if (histActiveFilter === 'virtual') pkgs = pkgs.filter(p => p.category === 'virtual');
+  else if (histActiveFilter === 'action') pkgs = pkgs.filter(p => p.action);
+  if (histSearchQuery) {
+    pkgs = pkgs.filter(p =>
+      p.recipient.toLowerCase().includes(histSearchQuery) ||
+      (p.company||'').toLowerCase().includes(histSearchQuery) ||
+      p.tracking.toLowerCase().includes(histSearchQuery) ||
+      p.sender.toLowerCase().includes(histSearchQuery) ||
+      (p.action||'').toLowerCase().includes(histSearchQuery)
+    );
+  }
+  const meta = document.getElementById('hist-results-meta');
+  meta.textContent = histSearchQuery || histActiveFilter !== 'all'
+    ? `${pkgs.length} of ${total} collected`
+    : '';
+  const el = document.getElementById('hist-list');
+  if (!pkgs.length) {
+    el.innerHTML = `<div class="empty"><i class="ti ${histSearchQuery ? 'ti-search' : 'ti-history'}"></i>${histSearchQuery ? 'No results for "' + histSearchQuery + '"' : 'No collected packages yet'}</div>`;
+    return;
+  }
+  const q = histSearchQuery;
+  el.innerHTML = pkgs.map(p => `
+    <div class="hist-item">
+      <div class="hist-top"><span class="hist-name">${hl(p.recipient, q)}</span><span class="hist-time">${p.date}</span></div>
+      <div class="hist-meta">${hl(p.sender, q)} · ${hl(p.tracking, q)}${p.company ? ' · ' + hl(p.company, q) : ''}</div>
+      <div class="hist-tags">
+        ${catBadge(p.category)}
+        <span class="badge gray"><i class="ti ti-map-pin"></i>${p.pkgLocation}</span>
+        ${p.action ? `<span class="badge green"><i class="ti ${ACTION_ICONS[p.action]}"></i>${p.action}</span>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+// ── PKG CARD ──────────────────────────────────────────────────────
+function pkgCard(p, query) {
+  const urgent = p.status === 'pending-action' && !p.action;
+  const iconMap = { 'pending-action':'red', 'awaiting-reply':'amber', 'outgoing':'amber', 'collected':'gray', 'waiting':'blue' };
+  const iconClass = iconMap[p.status] || 'blue';
+  const iconName = urgent ? 'ti-alert-circle' : p.status === 'awaiting-reply' ? 'ti-clock' : p.type === 'out' ? 'ti-send' : p.status === 'collected' ? 'ti-check' : 'ti-package';
+  const q = query || '';
+  const name = hl(p.recipient, q);
+  const company = p.company ? ' <span style="font-weight:400;color:var(--text2)">· ' + hl(p.company, q) + '</span>' : '';
+  const meta = hl(p.sender, q) + ' · ' + p.pkgLocation + ' · ' + p.date;
+  return `<div class="pkg-card${urgent ? ' urgent' : ''}" onclick="showDetail(${p.id})">
+    <div class="pkg-icon ${iconClass}"><i class="ti ${iconName}"></i></div>
+    <div class="pkg-info">
+      <div class="pkg-name">${name}${company}</div>
+      <div class="pkg-meta">${meta}</div>
+    </div>
+    <div class="pkg-right">${statusBadge(p)}${catBadge(p.category)}</div>
+  </div>`;
+}
+
+function statusBadge(p) {
+  if (p.status === 'waiting') return '<span class="badge blue">Awaiting pickup</span>';
+  if (p.status === 'awaiting-reply') return '<span class="badge awaiting-reply"><i class="ti ti-clock"></i>Awaiting reply</span>';
+  if (p.status === 'pending-action') {
+    if (!p.action) return '<span class="badge red">Action needed</span>';
+    const actionClass = { 'Keep / Store onsite':'store', 'Destroy':'destroy', 'Scan to email':'scan-email', 'Forward':'forward' }[p.action] || 'green';
+    const actionIcon = ACTION_ICONS[p.action] || 'ti-check';
+    return `<span class="badge ${actionClass}"><i class="ti ${actionIcon}"></i>${p.action}</span>`;
+  }
+  if (p.status === 'collected') return '<span class="badge green"><i class="ti ti-check"></i>Collected</span>';
+  if (p.status === 'outgoing') return '<span class="badge amber">Outgoing</span>';
+  return '<span class="badge gray">Unknown</span>';
+}
+
+function catBadge(cat) {
+  return cat === 'virtual'
+    ? '<span class="badge purple">Virtual Office</span>'
+    : '<span class="badge gray">Workspace</span>';
+}
+
+function empty(icon, msg) {
+  return `<div class="empty"><i class="ti ${icon}"></i>${msg}</div>`;
+}
+
+// ── DETAIL ────────────────────────────────────────────────────────
+function showDetail(id) {
+  const p = packages.find(x => x.id === id);
+  if (!p) return;
+  const rows = [
+    ['Recipient', p.recipient],
+    p.company ? ['Company', p.company] : null,
+    ['Category', p.category === 'virtual' ? 'Virtual Office' : 'Workspace'],
+    ['Status', p.status === 'pending-action' ? (p.action ? p.action : 'Action needed') : p.status === 'awaiting-reply' ? 'Awaiting reply' : p.status.charAt(0).toUpperCase()+p.status.slice(1)],
+    ['Office', p.pkgLocation],
+    ['Carrier', p.sender],
+    ['Tracking', p.tracking],
+    p.storage ? ['Storage', p.storage] : null,
+    p.notes ? ['Notes', p.notes] : null,
+    ['Logged', p.date],
+    p.email ? ['Email', p.email] : null,
+  ].filter(Boolean);
+
+  let extra = '';
+
+  if (p.status === 'pending-action' && p.action) {
+    extra = `<div class="completed-action"><i class="ti ${ACTION_ICONS[p.action]||'ti-check'}"></i>Customer requested: <strong>${p.action}</strong></div>
+    <button class="btn primary" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
+  } else if (p.status === 'pending-action' && !p.action) {
+    extra = `<div style="background:var(--red-bg);border:1px solid #FECACA;border-radius:var(--radius-sm);padding:12px;margin-bottom:10px">
+      <div style="font-size:12px;font-weight:600;color:var(--red-text);margin-bottom:10px">Awaiting customer instruction</div>
+      <div class="action-grid">
+        ${ACTION_LIST.map(a=>`<button class="action-btn" onclick="simulateReply(${p.id},'${a}')"><i class="ti ${ACTION_ICONS[a]}"></i>${a}</button>`).join('')}
+      </div>
+    </div>`;
+  } else if (p.status === 'awaiting-reply') {
+    extra = `<div style="background:var(--amber-bg);border:1px solid #FDE68A;border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+      <i class="ti ti-clock" style="font-size:20px;color:var(--amber);flex-shrink:0"></i>
+      <div>
+        <div style="font-size:13px;font-weight:600;color:var(--amber-text)">Awaiting customer reply</div>
+        <div style="font-size:12px;color:var(--amber-text);margin-top:2px">Notification sent to ${p.email || p.recipient}</div>
+      </div>
+    </div>
+    <button class="btn secondary" onclick="simulateReply(${p.id},null)">Simulate customer reply</button>
+    <button class="btn primary" style="margin-top:8px" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
+  } else if (p.status === 'waiting' && p.category === 'virtual') {
+    extra = `<div style="margin-bottom:10px">
+      <div class="section-label">Notification sent — Virtual Office</div>
+      <div class="email-preview">
+        <strong>To:</strong> ${p.email}<br>
+        <strong>Subject:</strong> Package arrived — please advise<br><br>
+        Hi <strong>${p.recipient}</strong>, a package arrived from <strong>${p.sender}</strong>.<br><br>
+        Please choose an action:<br>
+        <span class="email-link">Keep / Store onsite</span><br>
+        <span class="email-link">Destroy</span><br>
+        <span class="email-link">Scan to email</span><br>
+        <span class="email-link">Forward</span>
+      </div>
+    </div>
+    <button class="btn secondary" onclick="simulateReply(${p.id},null)">Simulate customer reply</button>
+    <button class="btn primary" style="margin-top:8px" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
+  } else if (p.status === 'waiting') {
+    extra = `<button class="btn primary" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
+  }
+
+  document.getElementById('detail-content').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div><div style="font-size:17px;font-weight:600;color:var(--text)">${p.recipient}</div>${p.company?`<div style="font-size:13px;color:var(--text2)">${p.company}</div>`:''}</div>
+      ${catBadge(p.category)}
+    </div>
+    <div class="card card-pad" style="margin-bottom:12px">
+      <table class="detail-table">
+        ${rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}
+      </table>
+    </div>
+    ${extra}`;
+
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-detail').classList.add('active');
+  document.getElementById('main-scroll').scrollTop = 0;
+}
+
+async function markCollected(id) {
+  const p = packages.find(x => x.id === id);
+  if (p) {
+    p.status = 'collected'; p.date = 'Today, just now';
+    if (window.updatePackageInFirestore) await window.updatePackageInFirestore(p, { status:'collected', collectedAt: new Date().toISOString() });
+  }
+  showToast('Marked as collected');
+  updateBadges(); goBack();
+}
+
+async function markDone(id) {
+  const p = packages.find(x => x.id === id);
+  if (p) {
+    p.status = 'collected'; p.date = 'Today, just now';
+    if (window.updatePackageInFirestore) await window.updatePackageInFirestore(p, { status:'collected', collectedAt: new Date().toISOString() });
+  }
+  showToast('Action completed');
+  updateBadges(); goBack();
+}
+
+async function simulateReply(id, action) {
+  const p = packages.find(x => x.id === id);
+  if (!p) return;
+  const chosen = action || ACTION_LIST[Math.floor(Math.random() * ACTION_LIST.length)];
+  p.status = 'pending-action';
+  p.action = chosen;
+  if (window.updatePackageInFirestore) await window.updatePackageInFirestore(p, { status:'pending-action', action: chosen });
+  showToast('Customer replied: ' + chosen);
+  updateBadges();
+  showDetail(id);
+}
+
+// ── SALESFORCE SEARCH ─────────────────────────────────────────────
+function sfSearch(val) {
+  const el = document.getElementById('sf-results');
+  if (val.length < 2) { el.classList.remove('open'); return; }
+  const results = SF_CUSTOMERS.filter(c =>
+    c.name.toLowerCase().includes(val.toLowerCase()) ||
+    c.company.toLowerCase().includes(val.toLowerCase())
+  ).slice(0, 5);
+  if (!results.length) { el.classList.remove('open'); return; }
+  el.innerHTML = results.map(c => {
+    const initials = c.name.split(' ').map(w=>w[0]).join('').slice(0,2);
+    return `<div class="sf-item" onclick="sfSelect('${c.id}')">
+      <div class="sf-avatar">${initials}</div>
+      <div><div class="sf-name">${c.name}</div><div class="sf-sub">${c.company} · ${c.location}</div></div>
+      <span class="badge ${c.type==='virtual'?'purple':'gray'} sf-badge">${c.type==='virtual'?'Virtual Office':'Workspace'}</span>
+    </div>`;
+  }).join('');
+  el.classList.add('open');
+}
+
+function sfSelect(id) {
+  const c = SF_CUSTOMERS.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('sf-search').value = '';
+  document.getElementById('sf-results').classList.remove('open');
+  document.getElementById('f-recipient').value = c.name;
+  document.getElementById('f-email').value = c.email;
+  document.getElementById('f-category').value = c.type;
+  const locEl = document.getElementById('f-pkg-location');
+  if ([...locEl.options].find(o => o.value === c.location)) locEl.value = c.location;
+  onCategoryChange();
+  updateVoPreview();
+  showToast('Customer loaded from Salesforce');
+}
+
+// ── FORM ──────────────────────────────────────────────────────────
+function onCategoryChange() {
+  const cat = document.getElementById('f-category').value;
+  document.getElementById('vo-preview-wrap').style.display = cat === 'virtual' ? 'block' : 'none';
+  updateVoPreview();
+}
+
+function updateVoPreview() {
+  document.getElementById('prev-name').textContent = document.getElementById('f-recipient').value || '[Recipient]';
+  document.getElementById('prev-sender').textContent = document.getElementById('f-sender').value || '[Carrier]';
+  document.getElementById('prev-email').textContent = document.getElementById('f-email').value || '[email]';
+}
+
+// ── CAMERA SCANNER ────────────────────────────────────────────────
+let cameraStream = null;
+let scannerCodeReader = null;
+
+async function openScanner() {
+  document.getElementById('scanner-overlay').classList.add('open');
+  document.getElementById('scanner-manual-input').value = '';
+  // Try to start real camera
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    cameraStream = stream;
+    const video = document.getElementById('scanner-video');
+    video.srcObject = stream;
+    video.play();
+    // Try ZXing if available (loaded below), else just show the UI
+    if (window.ZXing) startZXingScanner();
+  } catch(e) {
+    // Camera not available (desktop/permission denied) — silently continue, demo button still works
+  }
+}
+
+function startZXingScanner() {
+  try {
+    const hints = new Map();
+    const formats = [
+      window.ZXing.BarcodeFormat.QR_CODE,
+      window.ZXing.BarcodeFormat.CODE_128,
+      window.ZXing.BarcodeFormat.CODE_39,
+      window.ZXing.BarcodeFormat.EAN_13,
+      window.ZXing.BarcodeFormat.UPC_A,
+      window.ZXing.BarcodeFormat.DATA_MATRIX,
+    ];
+    hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+    scannerCodeReader = new window.ZXing.BrowserMultiFormatReader(hints);
+    scannerCodeReader.decodeFromVideoElement(
+      document.getElementById('scanner-video'),
+      (result, err) => {
+        if (result) onBarcodeDetected(result.getText());
+      }
+    );
+  } catch(e) {}
+}
+
+function closeScanner() {
+  document.getElementById('scanner-overlay').classList.remove('open');
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  if (scannerCodeReader) { try { scannerCodeReader.reset(); } catch(e) {} scannerCodeReader = null; }
+}
+
+function triggerDemoScan() {
+  // Simulate a real carrier barcode being detected
+  const demoCodes = [
+    { code:'FX829401827', carrier:'FedEx' },
+    { code:'DHL5554321099', carrier:'DHL' },
+    { code:'AP00192837465', carrier:'Australia Post' },
+    { code:'1Z888BB20987654321', carrier:'UPS' },
+    { code:'ST7762910384', carrier:'StarTrack' }
+  ];
+  const pick = demoCodes[Math.floor(Math.random() * demoCodes.length)];
+  onBarcodeDetected(pick.code, pick.carrier);
+}
+
+function onBarcodeDetected(code, carrierHint) {
+  // Flash effect
+  const flash = document.getElementById('scan-success');
+  flash.classList.add('flash');
+  setTimeout(() => flash.classList.remove('flash'), 400);
+
+  // Fill tracking field
+  document.getElementById('f-tracking').value = code;
+
+  // Auto-detect carrier from code pattern
+  if (!carrierHint) {
+    if (code.startsWith('1Z')) carrierHint = 'UPS';
+    else if (code.startsWith('FX') || code.startsWith('27') || code.startsWith('96')) carrierHint = 'FedEx';
+    else if (code.startsWith('DHL')) carrierHint = 'DHL';
+    else if (code.startsWith('AP')) carrierHint = 'Australia Post';
+    else if (code.startsWith('ST')) carrierHint = 'StarTrack';
+  }
+  if (carrierHint && !document.getElementById('f-sender').value) {
+    document.getElementById('f-sender').value = carrierHint;
+  }
+
+  // Close scanner after short delay so user sees the flash
+  setTimeout(() => {
+    closeScanner();
+    showToast('Barcode scanned — tracking number filled');
+    // Focus the name search so staff know to type the recipient name next
+    setTimeout(() => document.getElementById('sf-search').focus(), 300);
+  }, 450);
+}
+
+// Allow manual entry in scanner to confirm with Enter
+document.addEventListener('DOMContentLoaded', () => {
+  const mi = document.getElementById('scanner-manual-input');
+  if (mi) mi.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && mi.value.trim()) {
+      onBarcodeDetected(mi.value.trim());
+    }
+  });
+});
+
+// ── STAGING BATCH ─────────────────────────────────────────────────
+let stagingBatch = [];
+
+async function stagePackage() {
+  const type = document.getElementById('f-type').value;
+  const recipient = document.getElementById('f-recipient').value.trim();
+  const email = document.getElementById('f-email').value.trim();
+  const category = document.getElementById('f-category').value;
+  const pkgLocation = document.getElementById('f-pkg-location').value;
+  const tracking = document.getElementById('f-tracking').value.trim();
+  const sender = document.getElementById('f-sender').value.trim();
+  const storage = document.getElementById('f-storage').value.trim();
+  const notes = document.getElementById('f-notes').value.trim();
+  if (!recipient || !sender) { showToast('Please fill in recipient and carrier'); return; }
+
+  const now = new Date();
+  const timeStr = 'Today, ' + now.toLocaleTimeString('en-AU', { hour:'numeric', minute:'2-digit', hour12:true }).toLowerCase();
+  const staged = {
+    id: nextId++, type, recipient, email, company:'', category,
+    pkgLocation, sender, tracking: tracking || 'Manual entry',
+    storage, notes, date: timeStr,
+    status: type === 'out' ? 'outgoing' : (category === 'virtual' ? 'awaiting-reply' : 'waiting'),
+    action: null, loggedBy: currentUser?.name || 'Staff', createdAt: now.toISOString()
+  };
+  stagingBatch.push(staged);
+  packages.push(staged);
+
+  clearAddForm();
+  renderStagingBar();
+  showToast(`${recipient} added to batch`);
+  updateBadges();
+}
+
+function clearAddForm() {
+  ['f-recipient','f-email','f-tracking','f-sender','f-storage','f-notes','sf-search'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('f-category').value = 'workspace';
+  document.getElementById('f-type').value = 'in';
+  document.getElementById('vo-preview-wrap').style.display = 'none';
+}
+
+function renderStagingBar() {
+  const bar = document.getElementById('staging-bar');
+  if (!stagingBatch.length) { bar.classList.remove('show'); return; }
+  bar.classList.add('show');
+  document.getElementById('staging-count').textContent = stagingBatch.length;
+  document.getElementById('staging-list').innerHTML = stagingBatch.map((p, i) => {
+    const isVO = p.category === 'virtual';
+    return `<div class="staging-item">
+      <div class="staging-item-icon ${isVO ? 'purple' : 'blue'}">
+        <i class="ti ${isVO ? 'ti-building' : 'ti-package'}"></i>
+      </div>
+      <div class="staging-item-info">
+        <div class="staging-item-name">${p.recipient}</div>
+        <div class="staging-item-meta">${p.sender} · ${isVO ? 'Virtual Office' : 'Workspace'}</div>
+      </div>
+      <button class="staging-item-remove" onclick="removeStagedItem(${i})"><i class="ti ti-x"></i></button>
+    </div>`;
+  }).join('');
+}
+
+function removeStagedItem(idx) {
+  const removed = stagingBatch[idx];
+  stagingBatch.splice(idx, 1);
+  // Remove from packages too
+  const pi = packages.findIndex(p => p.id === removed.id);
+  if (pi !== -1) packages.splice(pi, 1);
+  renderStagingBar();
+  renderAll();
+}
+
+function discardBatch() {
+  stagingBatch.forEach(s => {
+    const pi = packages.findIndex(p => p.id === s.id);
+    if (pi !== -1) packages.splice(pi, 1);
+  });
+  stagingBatch = [];
+  renderStagingBar();
+  renderAll();
+  showToast('Batch discarded');
+}
+
+// ── SEND CONFIRM OVERLAY ──────────────────────────────────────────
+function openSendConfirm() {
+  if (!stagingBatch.length) return;
+
+  // Group by recipient email (one notification per person even if multiple packages)
+  const byRecipient = {};
+  stagingBatch.forEach(p => {
+    const key = p.email || p.recipient;
+    if (!byRecipient[key]) byRecipient[key] = { recipient: p.recipient, email: p.email, category: p.category, pkgs: [] };
+    byRecipient[key].pkgs.push(p);
+  });
+
+  const recipients = Object.values(byRecipient);
+  const wsCount = recipients.filter(r => r.category === 'workspace').length;
+  const voCount = recipients.filter(r => r.category === 'virtual').length;
+  const totalPkgs = stagingBatch.length;
+
+  document.getElementById('send-title').textContent = `Send ${totalPkgs} notification${totalPkgs !== 1 ? 's' : ''}`;
+  document.getElementById('send-sub').textContent = `${recipients.length} recipient${recipients.length !== 1 ? 's' : ''} · ${wsCount} Workspace · ${voCount} Virtual Office`;
+
+  const avatarColors = ['#2563EB','#7C3AED','#16A34A','#D97706','#DC2626','#0891B2'];
+  let html = '';
+
+  if (wsCount > 0) {
+    html += `<div class="send-group"><div class="send-group-label">Workspace — arrival notification</div>`;
+    recipients.filter(r => r.category === 'workspace').forEach((r, i) => {
+      const initials = r.recipient.split(' ').map(w => w[0]).join('').slice(0,2);
+      const pkgLabel = r.pkgs.length === 1 ? `1 package · ${r.pkgs[0].sender}` : `${r.pkgs.length} packages · ${r.pkgs.map(p=>p.sender).join(', ')}`;
+      html += `<div class="send-recipient">
+        <div class="send-recip-icon" style="background:${avatarColors[i % avatarColors.length]}">${initials}</div>
+        <div class="send-recip-info">
+          <div class="send-recip-name">${r.recipient}</div>
+          <div class="send-recip-email">${r.email || 'No email on file'}</div>
+          <div class="send-recip-pkgs">${pkgLabel}</div>
+          <span class="send-recip-type ws">Workspace</span>
+        </div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  if (voCount > 0) {
+    html += `<div class="send-group"><div class="send-group-label">Virtual Office — action request</div>`;
+    recipients.filter(r => r.category === 'virtual').forEach((r, i) => {
+      const initials = r.recipient.split(' ').map(w => w[0]).join('').slice(0,2);
+      const pkgLabel = r.pkgs.length === 1 ? `1 package · ${r.pkgs[0].sender}` : `${r.pkgs.length} packages — one email with all action links`;
+      html += `<div class="send-recipient">
+        <div class="send-recip-icon" style="background:${avatarColors[(i + wsCount) % avatarColors.length]}">${initials}</div>
+        <div class="send-recip-info">
+          <div class="send-recip-name">${r.recipient}</div>
+          <div class="send-recip-email">${r.email || 'No email on file'}</div>
+          <div class="send-recip-pkgs">${pkgLabel}</div>
+          <span class="send-recip-type vo">Virtual Office</span>
+        </div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  document.getElementById('send-groups').innerHTML = html;
+  document.getElementById('send-overlay').classList.add('open');
+}
+
+function closeSendOverlay() {
+  document.getElementById('send-overlay').classList.remove('open');
+}
+
+async function confirmSendAll() {
+  const count = stagingBatch.length;
+  const voCount = stagingBatch.filter(p => p.category === 'virtual').length;
+  const wsCount = stagingBatch.filter(p => p.category === 'workspace').length;
+  // Save all staged packages to Firestore if connected
+  if (window.savePackageToFirestore) {
+    for (const pkg of stagingBatch) {
+      try { await window.savePackageToFirestore(pkg); } catch(e) { /* offline fallback — already in memory */ }
+    }
+  }
+  stagingBatch = [];
+  closeSendOverlay();
+  renderStagingBar();
+  renderAll();
+  const msg = voCount > 0 && wsCount > 0
+    ? `${count} notifications sent — ${wsCount} arrival, ${voCount} action request${voCount !== 1 ? 's' : ''}`
+    : voCount > 0
+      ? `${voCount} Virtual Office action request${voCount !== 1 ? 's' : ''} sent`
+      : `${wsCount} arrival notification${wsCount !== 1 ? 's' : ''} sent`;
+  showToast(msg);
+  showPage('dashboard');
+}
+
+function submitPackage() { stagePackage(); } // legacy alias
+
+// ── NAV ───────────────────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  const nb = document.getElementById('nav-'+name);
+  if (nb) nb.classList.add('active');
+  if (name !== 'detail') prevPage = name;
+  document.getElementById('main-scroll').scrollTop = 0;
+  if (name === 'dashboard') renderDashboard();
+  if (name === 'actions') renderActions();
+  if (name === 'packages') renderPackages();
+  if (name === 'history') renderHistory();
+  if (name === 'reports') renderReports();
+}
+
+function goBack() { showPage(prevPage); }
+
+// ── TOAST ─────────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ── SIGNATURE CAPTURE ─────────────────────────────────────────────
+let sigPkgId = null;
+let sigDrawing = false;
+let sigHasStrokes = false;
+let sigCtx = null;
+
+function openSig(id) {
+  const p = packages.find(x => x.id === id);
+  if (!p) return;
+  sigPkgId = id;
+  document.getElementById('sig-title').textContent = `Signature — ${p.recipient}`;
+  document.getElementById('sig-sub').textContent = `Collecting: ${p.sender} · ${p.tracking}`;
+  document.getElementById('sig-overlay').classList.add('open');
+  initSigCanvas();
+}
+
+function initSigCanvas() {
+  const canvas = document.getElementById('sig-canvas');
+  const wrap = canvas.parentElement;
+  canvas.width = wrap.offsetWidth * window.devicePixelRatio;
+  canvas.height = 160 * window.devicePixelRatio;
+  canvas.style.width = wrap.offsetWidth + 'px';
+  canvas.style.height = '160px';
+  sigCtx = canvas.getContext('2d');
+  sigCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  sigCtx.strokeStyle = '#1A1917';
+  sigCtx.lineWidth = 2.5;
+  sigCtx.lineCap = 'round';
+  sigCtx.lineJoin = 'round';
+  sigHasStrokes = false;
+  document.getElementById('sig-placeholder').classList.remove('hidden');
+
+  const getPos = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const src = e.touches ? e.touches[0] : e;
+    return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+  };
+
+  canvas.onmousedown = canvas.ontouchstart = (e) => {
+    e.preventDefault();
+    sigDrawing = true;
+    sigHasStrokes = true;
+    document.getElementById('sig-placeholder').classList.add('hidden');
+    const pos = getPos(e);
+    sigCtx.beginPath();
+    sigCtx.moveTo(pos.x, pos.y);
+  };
+  canvas.onmousemove = canvas.ontouchmove = (e) => {
+    e.preventDefault();
+    if (!sigDrawing) return;
+    const pos = getPos(e);
+    sigCtx.lineTo(pos.x, pos.y);
+    sigCtx.stroke();
+    sigCtx.beginPath();
+    sigCtx.moveTo(pos.x, pos.y);
+  };
+  canvas.onmouseup = canvas.ontouchend = () => { sigDrawing = false; };
+}
+
+function clearSig() {
+  const canvas = document.getElementById('sig-canvas');
+  sigCtx.clearRect(0, 0, canvas.width, canvas.height);
+  sigHasStrokes = false;
+  document.getElementById('sig-placeholder').classList.remove('hidden');
+}
+
+async function confirmSig() {
+  if (!sigHasStrokes) { showToast('Please sign before confirming'); return; }
+  const canvas = document.getElementById('sig-canvas');
+  const sigData = canvas.toDataURL('image/png');
+  const p = packages.find(x => x.id === sigPkgId);
+  if (p) {
+    p.status = 'collected';
+    p.date = 'Today, just now';
+    p.signature = sigData;
+    if (window.updatePackageInFirestore) {
+      await window.updatePackageInFirestore(p, {
+        status: 'collected',
+        collectedAt: new Date().toISOString(),
+        signatureData: sigData
+      });
+    }
+  }
+  document.getElementById('sig-overlay').classList.remove('open');
+  showToast('Collected — signature saved');
+  updateBadges();
+  goBack();
+}
+
+// ── REPORTING ─────────────────────────────────────────────────────
+let reportPeriod = 'week';
+
+// Simulated extended dataset for richer reports
+const REPORT_DATA = {
+  week:    { days:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], volumes:[4,7,5,8,6,2,1], total:33, collected:28, avgHours:1.8, vo:14, ws:19 },
+  month:   { days:['W1','W2','W3','W4'], volumes:[31,28,35,33], total:127, collected:119, avgHours:2.1, vo:54, ws:73 },
+  quarter: { days:['Jan','Feb','Mar'], volumes:[98,112,127], total:337, collected:318, avgHours:2.4, vo:141, ws:196 },
+  all:     { days:['Q1','Q2','Q3','Q4'], volumes:[280,310,295,337], total:1222, collected:1180, avgHours:2.2, vo:508, ws:714 }
+};
+
+const REPORT_CARRIERS = {
+  week:    [['Australia Post',12],['FedEx',8],['DHL',7],['UPS',4],['StarTrack',2]],
+  month:   [['Australia Post',45],['FedEx',32],['DHL',28],['UPS',14],['StarTrack',8]],
+  quarter: [['Australia Post',128],['FedEx',89],['DHL',74],['UPS',32],['StarTrack',14]],
+  all:     [['Australia Post',460],['FedEx',318],['DHL',264],['UPS',112],['StarTrack',68]],
+};
+
+const REPORT_LOCS = {
+  week:    [['Martin Place',9],['Collins Street',7],['George Street',5],['York Street',4],['QV',3],['Surry Hills',2],['Others',3]],
+  month:   [['Martin Place',34],['Collins Street',28],['George Street',20],['York Street',16],['QV',12],['Surry Hills',8],['Others',9]],
+  quarter: [['Martin Place',98],['Collins Street',78],['George Street',56],['York Street',44],['QV',32],['Surry Hills',18],['Others',11]],
+  all:     [['Martin Place',356],['Collins Street',284],['George Street',202],['York Street',160],['QV',118],['Surry Hills',66],['Others',36]],
+};
+
+function setReportPeriod(period, btn) {
+  reportPeriod = period;
+  document.querySelectorAll('.period-chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  renderReports();
+}
+
+function renderReports() {
+  const d = REPORT_DATA[reportPeriod];
+  const carriers = REPORT_CARRIERS[reportPeriod];
+  const locs = REPORT_LOCS[reportPeriod];
+
+  // KPIs
+  const pending = filteredPkgs().filter(p => p.status === 'pending-action').length;
+  document.getElementById('report-kpis').innerHTML = `
+    <div class="report-stat"><div class="report-stat-num">${d.total}</div><div class="report-stat-label">Total received</div><div class="report-stat-sub">${d.collected} collected</div></div>
+    <div class="report-stat"><div class="report-stat-num" style="color:var(--red)">${d.total - d.collected}</div><div class="report-stat-label">Still pending</div><div class="report-stat-sub">${pending} need action</div></div>
+    <div class="report-stat"><div class="report-stat-num">${d.avgHours}h</div><div class="report-stat-label">Avg collection time</div><div class="report-stat-sub">From arrival to pickup</div></div>
+    <div class="report-stat"><div class="report-stat-num">${Math.round(d.vo / d.total * 100)}%</div><div class="report-stat-label">Virtual Office</div><div class="report-stat-sub">${d.ws} Workspace</div></div>
+  `;
+
+  // Volume bar chart
+  const maxVol = Math.max(...d.volumes);
+  document.getElementById('report-volume-chart').innerHTML = `
+    <div class="chart-title">Package volume</div>
+    <div class="bar-chart">
+      ${d.days.map((day, i) => {
+        const h = Math.round((d.volumes[i] / maxVol) * 80);
+        return `<div class="bar-col">
+          <div class="bar-val">${d.volumes[i]}</div>
+          <div class="bar blue" style="height:${h}px"></div>
+          <div class="bar-label">${day}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  // Donut: Workspace vs Virtual Office
+  const total = d.vo + d.ws;
+  const voPct = Math.round(d.vo / total * 100);
+  const wsPct = 100 - voPct;
+  const r = 40, cx = 50, cy = 50;
+  const circumference = 2 * Math.PI * r;
+  const voDash = (d.vo / total) * circumference;
+  const wsDash = (d.ws / total) * circumference;
+  document.getElementById('report-type-chart').innerHTML = `
+    <div class="chart-title">Customer type split</div>
+    <div class="donut-wrap">
+      <svg class="donut-svg" width="100" height="100" viewBox="0 0 100 100">
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#F0EEE9" stroke-width="14"/>
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#2563EB" stroke-width="14"
+          stroke-dasharray="${voDash} ${circumference}" stroke-dashoffset="${circumference * 0.25}" stroke-linecap="round"/>
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#7C3AED" stroke-width="14"
+          stroke-dasharray="${wsDash} ${circumference}" stroke-dashoffset="${circumference * 0.25 - voDash}" stroke-linecap="round"/>
+      </svg>
+      <div class="donut-legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#2563EB"></div><div class="legend-label">Workspace</div><div class="legend-pct">${wsPct}%</div><div class="legend-val">${d.ws}</div></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#7C3AED"></div><div class="legend-label">Virtual Office</div><div class="legend-pct">${voPct}%</div><div class="legend-val">${d.vo}</div></div>
+      </div>
+    </div>`;
+
+  // Carriers
+  const maxC = carriers[0][1];
+  document.getElementById('report-carrier-chart').innerHTML = `
+    <div class="chart-title">By carrier</div>
+    ${carriers.map(([name, count]) => `
+      <div class="rank-row">
+        <div class="rank-name">${name}</div>
+        <div class="rank-bar-wrap"><div class="rank-bar-fill" style="width:${Math.round(count/maxC*100)}%;background:var(--blue)"></div></div>
+        <div class="rank-count">${count}</div>
+      </div>`).join('')}`;
+
+  // Locations
+  const maxL = locs[0][1];
+  document.getElementById('report-location-chart').innerHTML = `
+    <div class="chart-title">By office location</div>
+    ${locs.map(([name, count]) => `
+      <div class="rank-row">
+        <div class="rank-name">${name}</div>
+        <div class="rank-bar-wrap"><div class="rank-bar-fill" style="width:${Math.round(count/maxL*100)}%;background:var(--purple)"></div></div>
+        <div class="rank-count">${count}</div>
+      </div>`).join('')}`;
+
+  // Avg collection time by category
+  document.getElementById('report-avgtime-chart').innerHTML = `
+    <div class="chart-title">Avg collection time</div>
+    <div class="avg-time-row"><div class="avg-time-label">Workspace customers</div><div class="avg-time-val">${(d.avgHours * 0.7).toFixed(1)}h</div></div>
+    <div class="avg-time-row"><div class="avg-time-label">Virtual Office customers</div><div class="avg-time-val">${(d.avgHours * 1.4).toFixed(1)}h</div></div>
+    <div class="avg-time-row"><div class="avg-time-label">Overall average</div><div class="avg-time-val">${d.avgHours}h</div></div>
+    <div class="avg-time-row"><div class="avg-time-label">Longest wait (this period)</div><div class="avg-time-val">${(d.avgHours * 4.2).toFixed(1)}h</div></div>
+  `;
+}
+
+// ── ADMIN PANEL ───────────────────────────────────────────────────
+let editingLocIndex = null;
+let deletingLocIndex = null;
+
+function openAdminPanel() {
+  document.getElementById('admin-screen').classList.add('open');
+  renderAdminOverview();
+  renderAdminLocations();
+  renderAdminStaff();
+}
+
+function doAdminLogout() {
+  document.getElementById('admin-screen').classList.remove('open');
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('l-email').value = '';
+  document.getElementById('l-password').value = '';
+}
+
+function renderAdminOverview() {
+  document.getElementById('admin-stat-locs').textContent = LOCATIONS.length;
+  document.getElementById('admin-stat-staff').textContent = USERS.length;
+  document.getElementById('admin-stat-pkgs').textContent = packages.filter(p => p.status !== 'collected').length;
+  document.getElementById('admin-loc-count').textContent = LOCATIONS.length + ' location' + (LOCATIONS.length !== 1 ? 's' : '');
+}
+
+function renderAdminLocations() {
+  const el = document.getElementById('admin-loc-list');
+  if (!LOCATIONS.length) {
+    el.innerHTML = '<div style="padding:20px;text-align:center;font-size:13px;color:var(--text3)">No locations added yet</div>';
+    return;
+  }
+  el.innerHTML = LOCATIONS.map((loc, i) => {
+    const isEditing = editingLocIndex === i;
+    const pkgCount = packages.filter(p => p.pkgLocation === loc).length;
+    return `<div class="admin-loc-item" id="admin-loc-row-${i}">
+      <div class="admin-loc-num">${String(i + 1).padStart(2, '0')}</div>
+      <div class="admin-loc-name${isEditing ? ' editing' : ''}" id="admin-loc-name-${i}">${loc}${pkgCount > 0 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${pkgCount} pkg${pkgCount !== 1 ? 's' : ''})</span>` : ''}</div>
+      <input class="admin-loc-input${isEditing ? ' editing' : ''}" id="admin-loc-input-${i}" value="${loc}" onkeydown="if(event.key==='Enter')saveLocEdit(${i});if(event.key==='Escape')cancelLocEdit(${i})"/>
+      <div class="admin-loc-actions">
+        ${isEditing
+          ? `<button class="admin-icon-btn save" onclick="saveLocEdit(${i})" title="Save"><i class="ti ti-check"></i></button>
+             <button class="admin-icon-btn cancel" onclick="cancelLocEdit(${i})" title="Cancel"><i class="ti ti-x"></i></button>`
+          : `<button class="admin-icon-btn edit" onclick="startLocEdit(${i})" title="Rename"><i class="ti ti-pencil"></i></button>
+             <button class="admin-icon-btn delete" onclick="openDeleteConfirm(${i})" title="Remove"><i class="ti ti-trash"></i></button>`
+        }
+      </div>
+    </div>`;
+  }).join('');
+  renderAdminOverview();
+}
+
+function startLocEdit(i) {
+  editingLocIndex = i;
+  renderAdminLocations();
+  const input = document.getElementById(`admin-loc-input-${i}`);
+  if (input) { input.focus(); input.select(); }
+}
+
+function cancelLocEdit(i) {
+  editingLocIndex = null;
+  renderAdminLocations();
+}
+
+function saveLocEdit(i) {
+  const input = document.getElementById(`admin-loc-input-${i}`);
+  const newName = input ? input.value.trim() : '';
+  if (!newName) { showAdminToast('Location name cannot be empty'); return; }
+  if (LOCATIONS.includes(newName) && LOCATIONS[i] !== newName) { showAdminToast('A location with that name already exists'); return; }
+  const oldName = LOCATIONS[i];
+  LOCATIONS[i] = newName;
+  packages.forEach(p => { if (p.pkgLocation === oldName) p.pkgLocation = newName; });
+  USERS.forEach(u => { if (u.location === oldName) u.location = newName; });
+  editingLocIndex = null;
+  renderAdminLocations();
+  if (document.getElementById('f-pkg-location')) populatePkgLocSelect();
+  if (window.saveLocationsToFirestore) window.saveLocationsToFirestore();
+  showAdminToast(`"${newName}" updated`);
+}
+
+function addLocation() {
+  const input = document.getElementById('admin-new-loc');
+  const name = input.value.trim();
+  if (!name) { showAdminToast('Please enter a location name'); input.focus(); return; }
+  if (LOCATIONS.includes(name)) { showAdminToast('That location already exists'); input.focus(); return; }
+  LOCATIONS.push(name);
+  input.value = '';
+  renderAdminLocations();
+  if (document.getElementById('f-pkg-location')) populatePkgLocSelect();
+  const list = document.getElementById('admin-loc-list');
+  list.scrollTop = list.scrollHeight;
+  if (window.saveLocationsToFirestore) window.saveLocationsToFirestore();
+  showAdminToast(`"${name}" added`);
+}
+
+function openDeleteConfirm(i) {
+  deletingLocIndex = i;
+  document.getElementById('delete-loc-name').textContent = LOCATIONS[i];
+  const pkgCount = packages.filter(p => p.pkgLocation === LOCATIONS[i]).length;
+  document.getElementById('delete-confirm-body').innerHTML =
+    `Are you sure you want to remove <strong>${LOCATIONS[i]}</strong>?` +
+    (pkgCount > 0 ? ` There ${pkgCount === 1 ? 'is' : 'are'} <strong>${pkgCount} active package${pkgCount !== 1 ? 's' : ''}</strong> logged at this location — they will remain in the system.` : '') +
+    ' This action cannot be undone in this session.';
+  document.getElementById('delete-confirm').classList.add('open');
+}
+
+function closeDeleteConfirm() {
+  document.getElementById('delete-confirm').classList.remove('open');
+  deletingLocIndex = null;
+}
+
+function confirmDeleteLocation() {
+  if (deletingLocIndex === null) return;
+  const removed = LOCATIONS[deletingLocIndex];
+  LOCATIONS.splice(deletingLocIndex, 1);
+  closeDeleteConfirm();
+  editingLocIndex = null;
+  renderAdminLocations();
+  if (document.getElementById('f-pkg-location')) populatePkgLocSelect();
+  if (window.saveLocationsToFirestore) window.saveLocationsToFirestore();
+  showAdminToast(`"${removed}" removed`);
+}
+
+function renderAdminStaff() {
+  const el = document.getElementById('admin-staff-list');
+  el.innerHTML = USERS.map(u => `
+    <div class="admin-loc-item">
+      <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${u.initials}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500;color:var(--text)">${u.name}</div>
+        <div style="font-size:11px;color:var(--text2)">${u.email} · ${u.location}</div>
+      </div>
+      <span class="badge gray">${u.role.includes('Manager') ? 'Manager' : 'Staff'}</span>
+    </div>`).join('');
+  document.getElementById('admin-staff-count').textContent = USERS.length + ' account' + (USERS.length !== 1 ? 's' : '');
+}
+
+// Admin-specific toast (separate from main app toast since admin is a different screen)
+function showAdminToast(msg) {
+  // Reuse main toast element — it's positioned fixed so visible over admin panel too
+  showToast(msg);
+}
+
+// ── ENTER KEY ─────────────────────────────────────────────────────
+document.getElementById('l-password').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
+</script>
+</body>
+</html>
