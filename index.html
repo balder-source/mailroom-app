@@ -563,7 +563,26 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
 .delete-confirm-body { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 18px; }
 .delete-confirm-body strong { color: var(--text); }
 .delete-confirm-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-/* ── TRACKING TIMELINE ── */
+/* ── ACTION COMPLETION ── */
+.action-complete-box { border-radius: var(--radius); padding: 14px; margin-bottom: 10px; border: 1px solid; }
+.action-complete-box.store { background: #F0FDF4; border-color: #BBF7D0; }
+.action-complete-box.destroy { background: #FEF2F2; border-color: #FECACA; }
+.action-complete-box.scan { background: #EFF4FF; border-color: #BFDBFE; }
+.action-complete-box.forward { background: #F5F3FF; border-color: #DDD6FE; }
+.action-complete-label { font-size: 12px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.action-complete-label.store { color: var(--green-text); }
+.action-complete-label.destroy { color: var(--red-text); }
+.action-complete-label.scan { color: var(--blue-text); }
+.action-complete-label.forward { color: var(--purple-text); }
+.forward-address-wrap { margin-bottom: 10px; }
+.forward-address-wrap label { display: block; font-size: 12px; font-weight: 500; color: var(--text2); margin-bottom: 5px; }
+.forward-address-input { width: 100%; font-size: 13px; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-med); background: var(--surface); color: var(--text); font-family: 'DM Sans', sans-serif; outline: none; transition: border-color .15s; }
+.forward-address-input:focus { border-color: var(--purple); }
+.forward-saved-hint { font-size: 11px; color: var(--purple-text); margin-top: 4px; display: flex; align-items: center; gap: 4px; }
+.btn.destroy { background: var(--red-bg); color: var(--red-text); border: 1px solid #FECACA; font-weight: 600; }
+.btn.scan-email { background: var(--blue-bg); color: var(--blue-text); border: 1px solid #BFDBFE; font-weight: 600; }
+.btn.forward { background: var(--purple-bg); color: var(--purple-text); border: 1px solid #DDD6FE; font-weight: 600; }
+</style>
 .timeline { margin-bottom: 12px; }
 .timeline-title { font-size: 12px; font-weight: 600; color: var(--text3); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
 .timeline-missing { font-size: 11px; font-weight: 600; color: var(--red); background: var(--red-bg); padding: 2px 8px; border-radius: 99px; letter-spacing: 0; text-transform: none; }
@@ -1421,6 +1440,7 @@ function renderHistory() {
         ${catBadge(p.category)}
         <span class="badge gray"><i class="ti ti-map-pin"></i>${p.pkgLocation}</span>
         ${p.action ? `<span class="badge green"><i class="ti ${ACTION_ICONS[p.action]}"></i>${p.action}</span>` : ''}
+        ${p.forwardedTo ? `<span class="badge purple"><i class="ti ti-send"></i>${p.forwardedTo}</span>` : ''}
       </div>
     </div>`).join('');
 }
@@ -1469,7 +1489,101 @@ function empty(icon, msg) {
   return `<div class="empty"><i class="ti ${icon}"></i>${msg}</div>`;
 }
 
-// ── TRACKING TIMELINE ─────────────────────────────────────────────
+// ── FORWARDING ADDRESS MEMORY ─────────────────────────────────────
+// Stores last used forwarding address per recipient email
+const forwardingAddresses = {
+  'marcus@acmeco.com': '12 Collins St, Melbourne VIC 3000',
+  'o.kim@consult.com': '88 Pitt St, Sydney NSW 2000'
+};
+
+function getForwardingAddress(email) {
+  return email ? (forwardingAddresses[email] || '') : '';
+}
+
+function saveForwardingAddress(email, address) {
+  if (email && address) forwardingAddresses[email] = address;
+}
+
+// ── ACTION COMPLETION BUTTONS ─────────────────────────────────────
+function buildActionCompletion(p) {
+  const action = p.action;
+  if (!action) return '';
+
+  if (action === 'Keep / Store onsite') {
+    return `<div class="action-complete-box store">
+      <div class="action-complete-label store"><i class="ti ti-building-warehouse"></i>Customer requested: Keep / Store onsite</div>
+      <div style="font-size:12px;color:var(--green-text);margin-bottom:10px">Store the package at ${p.storage || 'your location'} and collect with signature when the customer comes in.</div>
+    </div>
+    <button class="btn primary" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
+  }
+
+  if (action === 'Destroy') {
+    return `<div class="action-complete-box destroy">
+      <div class="action-complete-label destroy"><i class="ti ti-trash"></i>Customer requested: Destroy</div>
+      <div style="font-size:12px;color:var(--red-text);margin-bottom:10px">Securely destroy the package and confirm below. This action is permanent and will be recorded in the timeline.</div>
+    </div>
+    <button class="btn destroy" onclick="completeAction(${p.id},'Destroy','Package securely destroyed by team','ti-trash','red')">
+      <i class="ti ti-trash" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Confirm destroyed
+    </button>`;
+  }
+
+  if (action === 'Scan to email') {
+    return `<div class="action-complete-box scan">
+      <div class="action-complete-label scan"><i class="ti ti-mail"></i>Customer requested: Scan to email</div>
+      <div style="font-size:12px;color:var(--blue-text);margin-bottom:10px">Scan the contents and email to ${p.email || p.recipient}, then confirm below.</div>
+    </div>
+    <button class="btn scan-email" onclick="completeAction(${p.id},'Scan to email','Package scanned and emailed to ${p.email || p.recipient}','ti-mail','blue')">
+      <i class="ti ti-mail" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Confirm scanned & emailed
+    </button>`;
+  }
+
+  if (action === 'Forward') {
+    const savedAddr = getForwardingAddress(p.email);
+    const hasSaved = !!savedAddr;
+    return `<div class="action-complete-box forward">
+      <div class="action-complete-label forward"><i class="ti ti-send"></i>Customer requested: Forward</div>
+      <div class="forward-address-wrap">
+        <label>Forwarding address</label>
+        <input class="forward-address-input" id="forward-addr-${p.id}" placeholder="Street, Suburb, State, Postcode" value="${savedAddr}"/>
+        ${hasSaved ? `<div class="forward-saved-hint"><i class="ti ti-history" style="font-size:13px"></i>Last used address pre-filled — confirm or update</div>` : ''}
+      </div>
+    </div>
+    <button class="btn forward" onclick="completeForward(${p.id})">
+      <i class="ti ti-send" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Confirm forwarded
+    </button>`;
+  }
+
+  return '';
+}
+
+async function completeAction(id, actionLabel, timelineDetail, icon, color) {
+  const p = packages.find(x => x.id === id);
+  if (!p) return;
+  p.status = 'collected';
+  p.date = 'Today, just now';
+  addTimelineEvent(p, actionLabel + ' completed', timelineDetail, icon, color);
+  if (window.updatePackageInFirestore) await window.updatePackageInFirestore(p, { status:'collected', collectedAt: new Date().toISOString(), timeline: p.timeline });
+  showToast(actionLabel + ' confirmed & logged');
+  updateBadges();
+  goBack();
+}
+
+async function completeForward(id) {
+  const p = packages.find(x => x.id === id);
+  if (!p) return;
+  const addrInput = document.getElementById(`forward-addr-${id}`);
+  const address = addrInput ? addrInput.value.trim() : '';
+  if (!address) { showToast('Please enter a forwarding address'); addrInput && addrInput.focus(); return; }
+  saveForwardingAddress(p.email, address);
+  p.status = 'collected';
+  p.date = 'Today, just now';
+  p.forwardedTo = address;
+  addTimelineEvent(p, 'Forward completed', `Package forwarded to: ${address}`, 'ti-send', 'purple');
+  if (window.updatePackageInFirestore) await window.updatePackageInFirestore(p, { status:'collected', collectedAt: new Date().toISOString(), forwardedTo: address, timeline: p.timeline });
+  showToast('Forwarded to ' + address);
+  updateBadges();
+  goBack();
+}
 function buildTimeline(p) {
   const tl = p.timeline || [];
 
@@ -1557,8 +1671,7 @@ function showDetail(id) {
   let extra = '';
 
   if (p.status === 'pending-action' && p.action) {
-    extra = `<div class="completed-action"><i class="ti ${ACTION_ICONS[p.action]||'ti-check'}"></i>Customer requested: <strong>${p.action}</strong></div>
-    <button class="btn primary" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
+    extra = buildActionCompletion(p);
   } else if (p.status === 'pending-action' && !p.action) {
     extra = `<div style="background:var(--red-bg);border:1px solid #FECACA;border-radius:var(--radius-sm);padding:12px;margin-bottom:10px">
       <div style="font-size:12px;font-weight:600;color:var(--red-text);margin-bottom:10px">Awaiting customer instruction</div>
