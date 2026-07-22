@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css"/>
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <!-- Firebase -->
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
@@ -234,6 +235,7 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
 .stat-label { font-size: 11px; color: var(--text3); margin-bottom: 4px; font-weight: 500; }
 .stat-num { font-size: 26px; font-weight: 600; color: var(--text); font-family: 'DM Mono', monospace; letter-spacing: -1px; line-height: 1; }
 .stat-num.red { color: var(--red); }
+.stat-num.green { color: var(--green); }
 
 /* ── PKG CARDS ── */
 .pkg-card { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 11px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
@@ -761,15 +763,23 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
   <div class="scroll" id="main-scroll">
     <!-- DASHBOARD -->
     <div class="page active" id="page-dashboard">
-      <div id="dash-alert"></div>
-      <div class="stat-row">
-        <div class="stat-card"><div class="stat-label">Awaiting pickup</div><div class="stat-num" id="s-waiting">0</div></div>
-        <div class="stat-card"><div class="stat-label">Action needed</div><div class="stat-num red" id="s-actions">0</div></div>
-        <div class="stat-card"><div class="stat-label">Collected today</div><div class="stat-num" id="s-collected">0</div></div>
-        <div class="stat-card"><div class="stat-label">This week</div><div class="stat-num" id="s-total">0</div></div>
+      <div class="search-bar-wrap" style="margin-bottom:12px">
+        <i class="ti ti-search search-icon"></i>
+        <input class="search-bar" id="dash-search" type="text" placeholder="Search name, company, tracking…" oninput="onDashSearch(this.value)" autocomplete="off"/>
+        <button class="search-clear" id="dash-search-clear" onclick="clearDashSearch()"><i class="ti ti-x"></i></button>
       </div>
-      <div class="section-label">Awaiting pickup</div>
-      <div id="dash-list"></div>
+      <div id="dash-search-results" style="display:none"></div>
+      <div id="dash-main">
+        <div id="dash-alert"></div>
+        <div class="stat-row">
+          <div class="stat-card"><div class="stat-label">Awaiting pickup</div><div class="stat-num" id="s-waiting">0</div></div>
+          <div class="stat-card"><div class="stat-label">Action needed</div><div class="stat-num" id="s-actions">0</div></div>
+          <div class="stat-card"><div class="stat-label">Collected today</div><div class="stat-num" id="s-collected">0</div></div>
+          <div class="stat-card"><div class="stat-label">This week</div><div class="stat-num" id="s-total">0</div></div>
+        </div>
+        <div class="section-label">Awaiting pickup</div>
+        <div id="dash-list"></div>
+      </div>
     </div>
 
     <!-- ACTIONS -->
@@ -787,10 +797,10 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
           <select id="f-type"><option value="in">Incoming package</option><option value="out">Outgoing mail</option></select>
         </div>
 
-        <div class="section-label" style="margin-top:4px">Search Salesforce for recipient</div>
+        <div class="section-label" style="margin-top:4px">Search for recipient</div>
         <div class="sf-search-wrap">
           <i class="ti ti-search"></i>
-          <input type="text" id="sf-search" placeholder="Start typing a name…" oninput="sfSearch(this.value)" autocomplete="off"/>
+          <input type="text" id="sf-search" placeholder="Start typing a name or company…" oninput="sfSearch(this.value)" autocomplete="off"/>
           <div class="sf-results" id="sf-results"></div>
         </div>
 
@@ -805,12 +815,12 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
         <div class="form-group">
           <label>Customer type</label>
           <select id="f-category" onchange="onCategoryChange()">
-            <option value="workspace">Workspace</option>
+            <option value="workspace">Full Time Member</option>
             <option value="virtual">Virtual Office</option>
           </select>
         </div>
         <div class="form-group">
-          <label>Office location</label>
+          <label>Mail received location</label>
           <select id="f-pkg-location"></select>
         </div>
 
@@ -872,7 +882,7 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
         <button class="filter-chip" onclick="setPkgFilter('awaiting-reply',this)">Awaiting reply</button>
         <button class="filter-chip" onclick="setPkgFilter('pending-action',this)">Action needed</button>
         <button class="filter-chip" onclick="setPkgFilter('outgoing',this)">Outgoing</button>
-        <button class="filter-chip" onclick="setPkgFilter('workspace',this)">Workspace</button>
+        <button class="filter-chip" onclick="setPkgFilter('workspace',this)">Full Time Member</button>
         <button class="filter-chip" onclick="setPkgFilter('virtual',this)">Virtual Office</button>
       </div>
       <div class="results-meta" id="pkg-results-meta"></div>
@@ -888,7 +898,7 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
       </div>
       <div class="filter-row">
         <button class="filter-chip active" onclick="setHistFilter('all',this)">All</button>
-        <button class="filter-chip" onclick="setHistFilter('workspace',this)">Workspace</button>
+        <button class="filter-chip" onclick="setHistFilter('workspace',this)">Full Time Member</button>
         <button class="filter-chip" onclick="setHistFilter('virtual',this)">Virtual Office</button>
         <button class="filter-chip" onclick="setHistFilter('action',this)">Had action</button>
       </div>
@@ -898,11 +908,23 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
 
     <!-- REPORTS -->
     <div class="page" id="page-reports">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:15px;font-weight:600;color:var(--text)">Reports</div>
+        <button onclick="downloadReportExcel()" style="display:flex;align-items:center;gap:6px;background:var(--green-bg);color:var(--green-text);border:1px solid #BBF7D0;border-radius:var(--radius-sm);padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">
+          <i class="ti ti-table-export" style="font-size:16px"></i> Download Excel
+        </button>
+      </div>
       <div class="report-period" id="report-period-row">
         <button class="period-chip active" onclick="setReportPeriod('week',this)">This week</button>
         <button class="period-chip" onclick="setReportPeriod('month',this)">This month</button>
         <button class="period-chip" onclick="setReportPeriod('quarter',this)">This quarter</button>
         <button class="period-chip" onclick="setReportPeriod('all',this)">All time</button>
+      </div>
+      <div style="margin-bottom:12px">
+        <div class="section-label" style="margin-bottom:6px">Filter by location</div>
+        <select id="report-location-filter" onchange="renderReports()" style="width:100%;font-size:13px;padding:8px 10px;border-radius:var(--radius-sm);border:1px solid var(--border-med);background:var(--surface);color:var(--text);font-family:'DM Sans',sans-serif;outline:none">
+          <option value="all">All 19 locations</option>
+        </select>
       </div>
       <div class="report-grid" id="report-kpis"></div>
       <div class="chart-card" id="report-volume-chart"></div>
@@ -1057,25 +1079,25 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
 <script>
 // ── DATA ──────────────────────────────────────────────────────────
 let LOCATIONS = [
-  'Forum - Double Bay',
-  'Forum - Cremorne',
-  'Central House - Toorak',
-  'Central House - South Melbourne',
-  'George Street',
-  'Martin Place',
-  'York Street',
   'Castlereagh Street',
-  'Surry Hills',
+  'Central House - South Melbourne',
+  'Central House - Toorak',
   'Chippendale',
   'Collins Street',
-  'QV',
-  'Wellington Street',
-  'Gipp Street',
-  'Richmond',
   'Cremorne',
-  'South Yarra',
+  'Forum - Cremorne',
+  'Forum - Double Bay',
+  'George Street',
+  'Gipps Street',
+  'Martin Place',
+  'QV',
+  'Richmond',
+  'South Melbourne',
+  'Surry Hills',
   'Toorak Road',
-  'South Melbourne'
+  'Wellington Street',
+  'Wilson Street',
+  'York Street'
 ];
 
 const USERS = [
@@ -1283,7 +1305,12 @@ function renderDashboard() {
   const actions = pkgs.filter(p => p.status === 'pending-action');
   const collected = pkgs.filter(p => p.status === 'collected' && p.date.startsWith('Today'));
   document.getElementById('s-waiting').textContent = waiting.length;
-  document.getElementById('s-actions').textContent = actions.length;
+
+  // Action needed: green if 0, red if ≥1
+  const actionsEl = document.getElementById('s-actions');
+  actionsEl.textContent = actions.length;
+  actionsEl.className = 'stat-num ' + (actions.length >= 1 ? 'red' : 'green');
+
   document.getElementById('s-collected').textContent = collected.length;
   document.getElementById('s-total').textContent = pkgs.length;
 
@@ -1465,23 +1492,22 @@ function pkgCard(p, query) {
 }
 
 function statusBadge(p) {
-  if (p.status === 'waiting') return '<span class="badge blue">Awaiting pickup</span>';
-  if (p.status === 'awaiting-reply') return '<span class="badge awaiting-reply"><i class="ti ti-clock"></i>Awaiting reply</span>';
+  if (p.status === 'waiting') return '<span class="badge blue"><i class="ti ti-clock" style="font-size:11px"></i> Awaiting pickup</span>';
+  if (p.status === 'awaiting-reply') return '<span class="badge amber"><i class="ti ti-mail" style="font-size:11px"></i> Awaiting reply</span>';
   if (p.status === 'pending-action') {
-    if (!p.action) return '<span class="badge red">Action needed</span>';
-    const actionClass = { 'Keep / Store onsite':'store', 'Destroy':'destroy', 'Scan to email':'scan-email', 'Forward':'forward' }[p.action] || 'green';
+    if (!p.action) return '<span class="badge red"><i class="ti ti-alert-circle" style="font-size:11px"></i> Action needed</span>';
     const actionIcon = ACTION_ICONS[p.action] || 'ti-check';
-    return `<span class="badge ${actionClass}"><i class="ti ${actionIcon}"></i>${p.action}</span>`;
+    return `<span class="badge red"><i class="ti ${actionIcon}" style="font-size:11px"></i> ${p.action}</span>`;
   }
-  if (p.status === 'collected') return '<span class="badge green"><i class="ti ti-check"></i>Collected</span>';
-  if (p.status === 'outgoing') return '<span class="badge amber">Outgoing</span>';
+  if (p.status === 'collected') return '<span class="badge green" style="font-weight:600"><i class="ti ti-circle-check" style="font-size:12px"></i> Collected</span>';
+  if (p.status === 'outgoing') return '<span class="badge amber"><i class="ti ti-send" style="font-size:11px"></i> Outgoing</span>';
   return '<span class="badge gray">Unknown</span>';
 }
 
 function catBadge(cat) {
   return cat === 'virtual'
     ? '<span class="badge purple">Virtual Office</span>'
-    : '<span class="badge gray">Workspace</span>';
+    : '<span class="badge gray">Full Time Member</span>';
 }
 
 function empty(icon, msg) {
@@ -1583,7 +1609,80 @@ async function completeForward(id) {
   updateBadges();
   goBack();
 }
-function buildTimeline(p) {
+// ── DASHBOARD SEARCH ──────────────────────────────────────────────
+let dashSearchQuery = '';
+
+function onDashSearch(val) {
+  dashSearchQuery = val.trim().toLowerCase();
+  document.getElementById('dash-search-clear').className = 'search-clear' + (val ? ' show' : '');
+  renderDashSearch();
+}
+
+function clearDashSearch() {
+  document.getElementById('dash-search').value = '';
+  dashSearchQuery = '';
+  document.getElementById('dash-search-clear').className = 'search-clear';
+  document.getElementById('dash-search-results').style.display = 'none';
+  document.getElementById('dash-main').style.display = 'block';
+}
+
+function renderDashSearch() {
+  const resultsEl = document.getElementById('dash-search-results');
+  const mainEl = document.getElementById('dash-main');
+  if (!dashSearchQuery) {
+    resultsEl.style.display = 'none';
+    mainEl.style.display = 'block';
+    return;
+  }
+  mainEl.style.display = 'none';
+  resultsEl.style.display = 'block';
+
+  const q = dashSearchQuery;
+  const matched = packages.filter(p =>
+    p.recipient.toLowerCase().includes(q) ||
+    (p.company||'').toLowerCase().includes(q) ||
+    p.tracking.toLowerCase().includes(q) ||
+    p.sender.toLowerCase().includes(q) ||
+    (p.email||'').toLowerCase().includes(q)
+  );
+
+  if (!matched.length) {
+    resultsEl.innerHTML = empty('ti-search', `No results for "${dashSearchQuery}"`);
+    return;
+  }
+
+  const active = matched.filter(p => p.status !== 'collected');
+  const history = matched.filter(p => p.status === 'collected');
+
+  let html = `<div class="results-meta">${matched.length} result${matched.length !== 1 ? 's' : ''} — tap any to view details & timeline</div>`;
+  if (active.length) {
+    html += `<div class="section-label" style="margin-bottom:8px">Active</div>`;
+    html += active.map(p => pkgCard(p, q)).join('');
+  }
+  if (history.length) {
+    html += `<div class="section-label" style="margin-top:${active.length?'12px':'0'};margin-bottom:8px">History</div>`;
+    html += history.map(p => `
+      <div class="hist-item" onclick="showDetail(${p.id})" style="cursor:pointer" onmouseenter="this.style.boxShadow='var(--shadow)'" onmouseleave="this.style.boxShadow='none'">
+        <div class="hist-top">
+          <span class="hist-name">${hl(p.recipient, q)}</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="hist-time">${p.date}</span>
+            <i class="ti ti-chevron-right" style="font-size:16px;color:var(--text3)"></i>
+          </div>
+        </div>
+        <div class="hist-meta">${hl(p.sender, q)} · ${hl(p.tracking, q)}${p.company ? ' · ' + hl(p.company, q) : ''}</div>
+        <div class="hist-tags">
+          ${catBadge(p.category)}
+          <span class="badge green" style="font-weight:600"><i class="ti ti-circle-check" style="font-size:12px"></i> Collected</span>
+          ${p.action ? `<span class="badge green"><i class="ti ${ACTION_ICONS[p.action]}"></i>${p.action}</span>` : ''}
+          ${p.forwardedTo ? `<span class="badge purple"><i class="ti ti-send"></i>${p.forwardedTo}</span>` : ''}
+        </div>
+      </div>`).join('');
+  }
+  resultsEl.innerHTML = html;
+}
+
+// ── TRACKING TIMELINE ─────────────────────────────────────────────
   const tl = p.timeline || [];
 
   // Work out what steps are still pending based on current status
@@ -1656,8 +1755,8 @@ function showDetail(id) {
   const rows = [
     ['Recipient', p.recipient],
     p.company ? ['Company', p.company] : null,
-    ['Category', p.category === 'virtual' ? 'Virtual Office' : 'Workspace'],
-    ['Status', p.status === 'pending-action' ? (p.action ? p.action : 'Action needed') : p.status === 'awaiting-reply' ? 'Awaiting reply' : p.status.charAt(0).toUpperCase()+p.status.slice(1)],
+    ['Category', p.category === 'virtual' ? 'Virtual Office' : 'Full Time Member'],
+    ['Status', p.status === 'pending-action' ? (p.action ? p.action : 'Action needed') : p.status === 'awaiting-reply' ? 'Awaiting reply' : p.status === 'collected' ? '✓ Collected' : p.status === 'waiting' ? 'Awaiting pickup' : p.status.charAt(0).toUpperCase()+p.status.slice(1)],
     ['Office', p.pkgLocation],
     ['Carrier', p.sender],
     ['Tracking', p.tracking],
@@ -1981,7 +2080,7 @@ function renderStagingBar() {
       </div>
       <div class="staging-item-info">
         <div class="staging-item-name">${p.recipient}</div>
-        <div class="staging-item-meta">${p.sender} · ${isVO ? 'Virtual Office' : 'Workspace'}</div>
+        <div class="staging-item-meta">${p.sender} · ${isVO ? 'Virtual Office' : 'Full Time Member'}</div>
       </div>
       <button class="staging-item-remove" onclick="removeStagedItem(${i})"><i class="ti ti-x"></i></button>
     </div>`;
@@ -2033,7 +2132,7 @@ function openSendConfirm() {
   let html = '';
 
   if (wsCount > 0) {
-    html += `<div class="send-group"><div class="send-group-label">Workspace — arrival notification</div>`;
+    html += `<div class="send-group"><div class="send-group-label">Full Time Member — arrival notification</div>`;
     recipients.filter(r => r.category === 'workspace').forEach((r, i) => {
       const initials = r.recipient.split(' ').map(w => w[0]).join('').slice(0,2);
       const pkgLabel = r.pkgs.length === 1 ? `1 package · ${r.pkgs[0].sender}` : `${r.pkgs.length} packages · ${r.pkgs.map(p=>p.sender).join(', ')}`;
@@ -2043,7 +2142,7 @@ function openSendConfirm() {
           <div class="send-recip-name">${r.recipient}</div>
           <div class="send-recip-email">${r.email || 'No email on file'}</div>
           <div class="send-recip-pkgs">${pkgLabel}</div>
-          <span class="send-recip-type ws">Workspace</span>
+          <span class="send-recip-type ws">Full Time Member</span>
         </div>
       </div>`;
     });
@@ -2109,12 +2208,13 @@ function showPage(name) {
   const nb = document.getElementById('nav-'+name);
   if (nb) nb.classList.add('active');
   if (name !== 'detail') prevPage = name;
+  if (name !== 'dashboard') clearDashSearch();
   document.getElementById('main-scroll').scrollTop = 0;
   if (name === 'dashboard') renderDashboard();
   if (name === 'actions') renderActions();
   if (name === 'packages') renderPackages();
   if (name === 'history') renderHistory();
-  if (name === 'reports') renderReports();
+  if (name === 'reports') { populateReportLocationFilter(); renderReports(); }
 }
 
 function goBack() { showPage(prevPage); }
@@ -2251,37 +2351,78 @@ function setReportPeriod(period, btn) {
   renderReports();
 }
 
-function renderReports() {
+function populateReportLocationFilter() {
+  const el = document.getElementById('report-location-filter');
+  if (!el) return;
+  const current = el.value;
+  el.innerHTML = '<option value="all">All 19 locations</option>' +
+    LOCATIONS.map(l => `<option value="${l}"${l === current ? ' selected' : ''}>${l}</option>`).join('');
+}
+
+function getReportLocationFilter() {
+  const el = document.getElementById('report-location-filter');
+  return el ? el.value : 'all';
+}
+
+function getReportData() {
+  const locFilter = getReportLocationFilter();
   const d = REPORT_DATA[reportPeriod];
   const carriers = REPORT_CARRIERS[reportPeriod];
   const locs = REPORT_LOCS[reportPeriod];
 
-  // KPIs
+  // If a specific location is selected, scale down the simulated data
+  if (locFilter !== 'all') {
+    const locRow = locs.find(([n]) => n === locFilter);
+    const locCount = locRow ? locRow[1] : Math.round(d.total / 19);
+    const scale = d.total > 0 ? locCount / d.total : 1;
+    return {
+      d: {
+        ...d,
+        total: locCount,
+        collected: Math.round(d.collected * scale),
+        vo: Math.round(d.vo * scale),
+        ws: Math.round(d.ws * scale),
+        volumes: d.volumes.map(v => Math.max(0, Math.round(v * scale)))
+      },
+      carriers: carriers.map(([n, c]) => [n, Math.max(0, Math.round(c * scale))]),
+      locs: [[locFilter, locCount]],
+      locFilter
+    };
+  }
+  return { d, carriers, locs, locFilter };
+}
+
+function renderReports() {
+  populateReportLocationFilter();
+  const { d, carriers, locs, locFilter } = getReportData();
   const pending = filteredPkgs().filter(p => p.status === 'pending-action').length;
+  const locationLabel = locFilter === 'all' ? 'All 19 locations' : locFilter;
+
+  // KPIs
   document.getElementById('report-kpis').innerHTML = `
     <div class="report-stat"><div class="report-stat-num">${d.total}</div><div class="report-stat-label">Total received</div><div class="report-stat-sub">${d.collected} collected</div></div>
     <div class="report-stat"><div class="report-stat-num" style="color:var(--red)">${d.total - d.collected}</div><div class="report-stat-label">Still pending</div><div class="report-stat-sub">${pending} need action</div></div>
     <div class="report-stat"><div class="report-stat-num">${d.avgHours}h</div><div class="report-stat-label">Avg collection time</div><div class="report-stat-sub">From arrival to pickup</div></div>
-    <div class="report-stat"><div class="report-stat-num">${Math.round(d.vo / d.total * 100)}%</div><div class="report-stat-label">Virtual Office</div><div class="report-stat-sub">${d.ws} Workspace</div></div>
+    <div class="report-stat"><div class="report-stat-num">${Math.round(d.vo / Math.max(d.total,1) * 100)}%</div><div class="report-stat-label">Virtual Office</div><div class="report-stat-sub">${d.ws} Workspace</div></div>
   `;
 
   // Volume bar chart
-  const maxVol = Math.max(...d.volumes);
+  const maxVol = Math.max(...d.volumes, 1);
   document.getElementById('report-volume-chart').innerHTML = `
-    <div class="chart-title">Package volume</div>
+    <div class="chart-title">Package volume — ${locationLabel}</div>
     <div class="bar-chart">
       ${d.days.map((day, i) => {
         const h = Math.round((d.volumes[i] / maxVol) * 80);
         return `<div class="bar-col">
           <div class="bar-val">${d.volumes[i]}</div>
-          <div class="bar blue" style="height:${h}px"></div>
+          <div class="bar blue" style="height:${Math.max(h,2)}px"></div>
           <div class="bar-label">${day}</div>
         </div>`;
       }).join('')}
     </div>`;
 
-  // Donut: Workspace vs Virtual Office
-  const total = d.vo + d.ws;
+  // Donut
+  const total = Math.max(d.vo + d.ws, 1);
   const voPct = Math.round(d.vo / total * 100);
   const wsPct = 100 - voPct;
   const r = 40, cx = 50, cy = 50;
@@ -2289,7 +2430,7 @@ function renderReports() {
   const voDash = (d.vo / total) * circumference;
   const wsDash = (d.ws / total) * circumference;
   document.getElementById('report-type-chart').innerHTML = `
-    <div class="chart-title">Customer type split</div>
+    <div class="chart-title">Customer type split — ${locationLabel}</div>
     <div class="donut-wrap">
       <svg class="donut-svg" width="100" height="100" viewBox="0 0 100 100">
         <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#F0EEE9" stroke-width="14"/>
@@ -2299,16 +2440,17 @@ function renderReports() {
           stroke-dasharray="${wsDash} ${circumference}" stroke-dashoffset="${circumference * 0.25 - voDash}" stroke-linecap="round"/>
       </svg>
       <div class="donut-legend">
-        <div class="legend-item"><div class="legend-dot" style="background:#2563EB"></div><div class="legend-label">Workspace</div><div class="legend-pct">${wsPct}%</div><div class="legend-val">${d.ws}</div></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#2563EB"></div><div class="legend-label">Full Time Member</div><div class="legend-pct">${wsPct}%</div><div class="legend-val">${d.ws}</div></div>
         <div class="legend-item"><div class="legend-dot" style="background:#7C3AED"></div><div class="legend-label">Virtual Office</div><div class="legend-pct">${voPct}%</div><div class="legend-val">${d.vo}</div></div>
       </div>
     </div>`;
 
   // Carriers
-  const maxC = carriers[0][1];
+  const filteredCarriers = carriers.filter(([,c]) => c > 0);
+  const maxC = Math.max(...filteredCarriers.map(([,c]) => c), 1);
   document.getElementById('report-carrier-chart').innerHTML = `
-    <div class="chart-title">By carrier</div>
-    ${carriers.map(([name, count]) => `
+    <div class="chart-title">By carrier — ${locationLabel}</div>
+    ${filteredCarriers.map(([name, count]) => `
       <div class="rank-row">
         <div class="rank-name">${name}</div>
         <div class="rank-bar-wrap"><div class="rank-bar-fill" style="width:${Math.round(count/maxC*100)}%;background:var(--blue)"></div></div>
@@ -2316,7 +2458,7 @@ function renderReports() {
       </div>`).join('')}`;
 
   // Locations
-  const maxL = locs[0][1];
+  const maxL = Math.max(...locs.map(([,c]) => c), 1);
   document.getElementById('report-location-chart').innerHTML = `
     <div class="chart-title">By office location</div>
     ${locs.map(([name, count]) => `
@@ -2326,14 +2468,91 @@ function renderReports() {
         <div class="rank-count">${count}</div>
       </div>`).join('')}`;
 
-  // Avg collection time by category
+  // Avg times
   document.getElementById('report-avgtime-chart').innerHTML = `
-    <div class="chart-title">Avg collection time</div>
-    <div class="avg-time-row"><div class="avg-time-label">Workspace customers</div><div class="avg-time-val">${(d.avgHours * 0.7).toFixed(1)}h</div></div>
+    <div class="chart-title">Avg collection time — ${locationLabel}</div>
+    <div class="avg-time-row"><div class="avg-time-label">Full Time Member customers</div><div class="avg-time-val">${(d.avgHours * 0.7).toFixed(1)}h</div></div>
     <div class="avg-time-row"><div class="avg-time-label">Virtual Office customers</div><div class="avg-time-val">${(d.avgHours * 1.4).toFixed(1)}h</div></div>
     <div class="avg-time-row"><div class="avg-time-label">Overall average</div><div class="avg-time-val">${d.avgHours}h</div></div>
     <div class="avg-time-row"><div class="avg-time-label">Longest wait (this period)</div><div class="avg-time-val">${(d.avgHours * 4.2).toFixed(1)}h</div></div>
   `;
+}
+
+function downloadReportExcel() {
+  if (typeof XLSX === 'undefined') { showToast('Excel library not loaded yet — try again in a moment'); return; }
+  const { d, carriers, locs, locFilter } = getReportData();
+  const periodLabel = { week:'This Week', month:'This Month', quarter:'This Quarter', all:'All Time' }[reportPeriod];
+  const locationLabel = locFilter === 'all' ? 'All Locations' : locFilter;
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1 — Summary KPIs
+  const summaryData = [
+    ['Commons Mailroom Report'],
+    ['Period', periodLabel],
+    ['Location', locationLabel],
+    ['Generated', new Date().toLocaleDateString('en-AU', { day:'numeric', month:'long', year:'numeric' })],
+    [],
+    ['SUMMARY'],
+    ['Total received', d.total],
+    ['Collected', d.collected],
+    ['Still pending', d.total - d.collected],
+    ['Collection rate', Math.round(d.collected / Math.max(d.total,1) * 100) + '%'],
+    ['Avg collection time (hrs)', d.avgHours],
+    ['Full Time Member packages', d.ws],
+    ['Virtual Office packages', d.vo],
+    ['Virtual Office %', Math.round(d.vo / Math.max(d.total,1) * 100) + '%'],
+  ];
+  const ws1 = XLSX.utils.aoa_to_sheet(summaryData);
+  ws1['!cols'] = [{ wch: 30 }, { wch: 20 }];
+  XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
+
+  // Sheet 2 — Volume by period
+  const volumeData = [
+    ['Period', 'Packages'],
+    ...d.days.map((day, i) => [day, d.volumes[i]])
+  ];
+  const ws2 = XLSX.utils.aoa_to_sheet(volumeData);
+  ws2['!cols'] = [{ wch: 16 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Volume');
+
+  // Sheet 3 — By carrier
+  const carrierData = [
+    ['Carrier', 'Packages'],
+    ...carriers.map(([n, c]) => [n, c])
+  ];
+  const ws3 = XLSX.utils.aoa_to_sheet(carrierData);
+  ws3['!cols'] = [{ wch: 20 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, ws3, 'By Carrier');
+
+  // Sheet 4 — By location
+  const locData = [
+    ['Location', 'Packages'],
+    ...locs.map(([n, c]) => [n, c])
+  ];
+  const ws4 = XLSX.utils.aoa_to_sheet(locData);
+  ws4['!cols'] = [{ wch: 28 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, ws4, 'By Location');
+
+  // Sheet 5 — Package log
+  const pkgData = [
+    ['Recipient', 'Company', 'Category', 'Carrier', 'Tracking', 'Location', 'Status', 'Action', 'Date', 'Forwarded To']
+  ];
+  const locPkgs = locFilter === 'all' ? packages : packages.filter(p => p.pkgLocation === locFilter);
+  locPkgs.forEach(p => {
+    pkgData.push([
+      p.recipient, p.company || '', p.category === 'virtual' ? 'Virtual Office' : 'Full Time Member',
+      p.sender, p.tracking, p.pkgLocation,
+      p.status === 'collected' ? 'Collected' : p.status === 'pending-action' ? 'Action needed' : p.status === 'awaiting-reply' ? 'Awaiting reply' : p.status === 'waiting' ? 'Awaiting pickup' : p.status,
+      p.action || '', p.date, p.forwardedTo || ''
+    ]);
+  });
+  const ws5 = XLSX.utils.aoa_to_sheet(pkgData);
+  ws5['!cols'] = [{ wch:20 },{ wch:18 },{ wch:16 },{ wch:16 },{ wch:20 },{ wch:22 },{ wch:18 },{ wch:20 },{ wch:20 },{ wch:30 }];
+  XLSX.utils.book_append_sheet(wb, ws5, 'Package Log');
+
+  const filename = `Commons-Mailroom-Report-${locationLabel.replace(/\s/g,'-')}-${periodLabel.replace(/\s/g,'-')}.xlsx`;
+  XLSX.writeFile(wb, filename);
+  showToast('Excel report downloaded');
 }
 
 // ── ADMIN PANEL ───────────────────────────────────────────────────
