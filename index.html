@@ -9,155 +9,18 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css"/>
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<!-- Firebase -->
-<script type="module">
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, setDoc, getDocs, deleteDoc, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-
-const firebaseConfig = {
-  apiKey: "AIzaSyCB2DqEuipqXZp-XkMezblTOxrfRnAt-tI",
-  authDomain: "mailroom-app-a8a1f.firebaseapp.com",
-  projectId: "mailroom-app-a8a1f",
-  storageBucket: "mailroom-app-a8a1f.firebasestorage.app",
-  messagingSenderId: "698496737126",
-  appId: "1:698496737126:web:9728df69835c840e92f2a7",
-  measurementId: "G-S4P8ZBTD22"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
-const provider = new GoogleAuthProvider();
-
-// Expose to global scope so non-module functions can call them
-window._db = db;
-window._auth = auth;
-window._provider = provider;
-window._fbFns = { collection, doc, onSnapshot, addDoc, updateDoc, setDoc, getDocs, deleteDoc, query, orderBy, signInWithPopup, signOut, onAuthStateChanged, GoogleAuthProvider };
-
-// ── AUTH STATE LISTENER ──────────────────────────────────────────
-onAuthStateChanged(auth, async (user) => {
-  if (user) {
-    // Only handle Google Sign-In users — demo login handles its own flow
-    if (window._demoLoggedIn) return;
-    const adminEmails = ['admin@mailroom.app'];
-    if (adminEmails.includes(user.email)) {
-      document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('app').style.display = 'none';
-      window._isAdmin = true;
-      await window.initFirestoreListeners();
-      openAdminPanel();
-      return;
-    }
-    window._firebaseUser = user;
-    await window.loadUserProfile(user);
-  } else {
-    // Not signed in via Google — only show login if demo isn't active
-    if (window._demoLoggedIn) return;
-    window._firebaseUser = null;
-    document.getElementById('app').style.display = 'none';
-    document.getElementById('admin-screen').classList.remove('open');
-    document.getElementById('login-screen').style.display = 'flex';
-  }
-});
-
-// ── FIRESTORE LISTENERS ─────────────────────────────────────────
-window.initFirestoreListeners = async function() {
-  const { collection, onSnapshot, query, orderBy } = window._fbFns;
-
-  // Listen to packages in real-time
-  const pkgsQuery = query(collection(db, 'packages'), orderBy('createdAt', 'desc'));
-  onSnapshot(pkgsQuery, (snap) => {
-    packages = snap.docs.map(d => ({ ...d.data(), _docId: d.id }));
-    renderAll();
-    updateBadges();
-    if (window._isAdmin) renderAdminOverview();
-  });
-
-  // Listen to locations in real-time
-  const locSnap = await getDocs(collection(db, 'settings'));
-  const locDoc = locSnap.docs.find(d => d.id === 'locations');
-  if (locDoc && locDoc.data().list && locDoc.data().list.length > 0) {
-    LOCATIONS = locDoc.data().list;
-  } else {
-    // First time — seed locations to Firestore
-    await setDoc(doc(db, 'settings', 'locations'), { list: LOCATIONS });
-  }
-
-  onSnapshot(doc(db, 'settings', 'locations'), (snap) => {
-    if (snap.exists() && snap.data().list) {
-      LOCATIONS = snap.data().list;
-      populatePkgLocSelect();
-      populateLocSelect();
-      if (window._isAdmin) renderAdminLocations();
-    }
-  });
-};
-
-// ── SAVE LOCATIONS TO FIRESTORE ──────────────────────────────────
-window.saveLocationsToFirestore = async function() {
-  const { doc, setDoc } = window._fbFns;
-  await setDoc(doc(db, 'settings', 'locations'), { list: LOCATIONS });
-};
-
-// ── SAVE PACKAGE TO FIRESTORE ────────────────────────────────────
-window.savePackageToFirestore = async function(pkg) {
-  const { collection, addDoc } = window._fbFns;
-  const pkgData = { ...pkg, createdAt: new Date().toISOString() };
-  delete pkgData.id; // Firestore generates its own ID
-  const ref = await addDoc(collection(db, 'packages'), pkgData);
-  return ref.id;
-};
-
-// ── UPDATE PACKAGE IN FIRESTORE ──────────────────────────────────
-window.updatePackageInFirestore = async function(pkg, fields) {
-  if (!pkg._docId) return;
-  const { doc, updateDoc } = window._fbFns;
-  await updateDoc(doc(db, 'packages', pkg._docId), fields);
-};
-
-// ── LOAD USER PROFILE ────────────────────────────────────────────
-window.loadUserProfile = async function(fbUser) {
-  const { doc, getDocs, collection, setDoc } = window._fbFns;
-  // Check if user profile exists in Firestore
-  const usersSnap = await getDocs(collection(db, 'users'));
-  let profile = usersSnap.docs.find(d => d.data().email === fbUser.email);
-
-  if (!profile) {
-    // New user — create profile with first available location as default
-    const defaultLoc = LOCATIONS[0] || 'Martin Place';
-    const nameParts = fbUser.displayName ? fbUser.displayName.split(' ') : ['User'];
-    const initials = nameParts.map(p => p[0]).join('').slice(0,2).toUpperCase();
-    const newProfile = {
-      email: fbUser.email,
-      name: fbUser.displayName || fbUser.email,
-      initials,
-      location: defaultLoc,
-      role: 'Mailroom Staff'
-    };
-    await setDoc(doc(db, 'users', fbUser.uid), newProfile);
-    window._userProfile = newProfile;
-  } else {
-    window._userProfile = profile.data();
-  }
-
-  currentUser = window._userProfile;
-  viewLocation = currentUser.location;
-
-  // Show app
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('app').style.display = 'flex';
-  document.getElementById('user-avatar').textContent = currentUser.initials;
-  document.getElementById('profile-avatar-lg').textContent = currentUser.initials;
-  document.getElementById('profile-name').textContent = currentUser.name;
-  document.getElementById('profile-role').textContent = currentUser.role + ' · ' + currentUser.location;
-
-  await window.initFirestoreListeners();
-  populateLocSheet();
-  populatePkgLocSelect();
-  updateLocLabel();
-};
+<!-- Firebase will be connected by your developer -->
+<!-- Demo login works fully without Firebase -->
+<script>
+  // Stubs so Firebase-referencing code doesn't crash
+  window._demoLoggedIn = false;
+  window._isAdmin = false;
+  window._firebaseUser = null;
+  window.savePackageToFirestore = null;
+  window.updatePackageInFirestore = null;
+  window.saveLocationsToFirestore = null;
+  window.initFirestoreListeners = null;
+  window.loadUserProfile = null;
 </script>
 <style>
 :root {
@@ -1181,14 +1044,7 @@ let prevPage = 'dashboard';
 
 // ── AUTH ──────────────────────────────────────────────────────────
 async function doGoogleLogin() {
-  try {
-    document.getElementById('login-error').classList.remove('show');
-    await window._fbFns.signInWithPopup(window._auth, window._provider);
-    // onAuthStateChanged handles the rest
-  } catch(e) {
-    document.getElementById('login-error').classList.add('show');
-    document.getElementById('login-error').textContent = 'Google sign-in failed. Make sure pop-ups are allowed.';
-  }
+  showToast('Google Sign-In will be enabled by your developer. Use a demo account below.');
 }
 
 function doLogin() {
