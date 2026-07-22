@@ -39,7 +39,8 @@ window._fbFns = { collection, doc, onSnapshot, addDoc, updateDoc, setDoc, getDoc
 // ── AUTH STATE LISTENER ──────────────────────────────────────────
 onAuthStateChanged(auth, async (user) => {
   if (user) {
-    // Signed in — check if admin
+    // Only handle Google Sign-In users — demo login handles its own flow
+    if (window._demoLoggedIn) return;
     const adminEmails = ['admin@mailroom.app'];
     if (adminEmails.includes(user.email)) {
       document.getElementById('login-screen').style.display = 'none';
@@ -49,11 +50,11 @@ onAuthStateChanged(auth, async (user) => {
       openAdminPanel();
       return;
     }
-    // Regular staff — load their profile from Firestore or create one
     window._firebaseUser = user;
     await window.loadUserProfile(user);
   } else {
-    // Not signed in — show login
+    // Not signed in via Google — only show login if demo isn't active
+    if (window._demoLoggedIn) return;
     window._firebaseUser = null;
     document.getElementById('app').style.display = 'none';
     document.getElementById('admin-screen').classList.remove('open');
@@ -1191,12 +1192,12 @@ async function doGoogleLogin() {
 }
 
 function doLogin() {
-  // Demo / admin fallback login (no Firebase needed)
   const email = document.getElementById('l-email').value.trim().toLowerCase();
   const pass = document.getElementById('l-password').value;
   document.getElementById('login-error').classList.remove('show');
 
   if (email === ADMIN_USER.email && pass === ADMIN_USER.password) {
+    window._demoLoggedIn = true;
     document.getElementById('login-screen').style.display = 'none';
     window._isAdmin = true;
     openAdminPanel();
@@ -1204,7 +1205,12 @@ function doLogin() {
   }
 
   const user = USERS.find(u => u.email === email && u.password === pass);
-  if (!user) { document.getElementById('login-error').classList.add('show'); document.getElementById('login-error').textContent = 'Incorrect email or password.'; return; }
+  if (!user) {
+    document.getElementById('login-error').classList.add('show');
+    document.getElementById('login-error').textContent = 'Incorrect email or password.';
+    return;
+  }
+  window._demoLoggedIn = true;
   currentUser = user;
   viewLocation = user.location;
   document.getElementById('login-screen').style.display = 'none';
@@ -1221,12 +1227,15 @@ function doLogin() {
 
 async function doLogout() {
   closeSheets();
+  window._demoLoggedIn = false;
+  window._isAdmin = false;
   if (window._firebaseUser) {
-    await window._fbFns.signOut(window._auth);
+    try { await window._fbFns.signOut(window._auth); } catch(e) {}
   }
   currentUser = null;
   window._firebaseUser = null;
   document.getElementById('app').style.display = 'none';
+  document.getElementById('admin-screen').classList.remove('open');
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('l-email').value = '';
   document.getElementById('l-password').value = '';
@@ -2567,6 +2576,8 @@ function openAdminPanel() {
 }
 
 function doAdminLogout() {
+  window._demoLoggedIn = false;
+  window._isAdmin = false;
   document.getElementById('admin-screen').classList.remove('open');
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('l-email').value = '';
