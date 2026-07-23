@@ -1881,15 +1881,51 @@ function onBarcodeDetected(code, carrierHint) {
   // Fill tracking field
   document.getElementById('f-tracking').value = code;
 
-  // Auto-detect carrier from code pattern
+  // Auto-detect carrier from tracking number patterns
   if (!carrierHint) {
-    if (code.startsWith('1Z')) carrierHint = 'UPS';
-    else if (code.startsWith('JD') || code.startsWith('61')) carrierHint = 'Australia Post';
-    else if (code.startsWith('FX') || code.startsWith('27') || code.startsWith('96') || code.startsWith('7489') || code.startsWith('7492')) carrierHint = 'FedEx';
-    else if (code.startsWith('DHL') || code.startsWith('JJD')) carrierHint = 'DHL';
-    else if (code.startsWith('AP') || code.startsWith('33') || code.startsWith('99')) carrierHint = 'Australia Post';
-    else if (code.startsWith('ST')) carrierHint = 'StarTrack';
-    else if (code.startsWith('TBA')) carrierHint = 'Amazon';
+    const c = code.toUpperCase().replace(/\s/g, '');
+
+    // UPS — always starts with 1Z
+    if (/^1Z/.test(c)) carrierHint = 'UPS';
+
+    // FedEx — 12, 15, 20, or 22 digit numbers, or starts with 96/74/75/77
+    else if (/^(96|74|75|77)\d{18,}/.test(c)) carrierHint = 'FedEx';
+    else if (/^\d{12}$/.test(c) || /^\d{15}$/.test(c) || /^\d{20}$/.test(c) || /^\d{22}$/.test(c)) carrierHint = 'FedEx';
+
+    // DHL Express — starts with JD or is 10-digit number, or DHL prefix
+    else if (/^JD/.test(c) || /^DHL/i.test(c)) carrierHint = 'DHL';
+    else if (/^\d{10}$/.test(c)) carrierHint = 'DHL';
+
+    // Australia Post — multiple formats
+    else if (/^(AP|33|99|AUS|EE|RR|CP|RA|RF|LZ|CJ|LA|LD|LK|LN|LX|PA|PC|SF|SX|UA|UP|UR|UX)\d/.test(c)) carrierHint = 'Australia Post';
+    else if (/^[A-Z]{2}\d{9}AU$/i.test(c)) carrierHint = 'Australia Post'; // International format
+    else if (/^\d{8}$/.test(c) || /^\d{13}$/.test(c)) carrierHint = 'Australia Post'; // Domestic parcel formats
+    else if (/^(7|8)\d{10}$/.test(c)) carrierHint = 'Australia Post'; // Express formats
+
+    // StarTrack
+    else if (/^ST/.test(c)) carrierHint = 'StarTrack';
+    else if (/^(AUS|ATL)\d/.test(c)) carrierHint = 'StarTrack';
+
+    // TNT / FedEx (TNT acquired by FedEx)
+    else if (/^(TNT|GE\d|[A-Z]\d{7}$)/.test(c)) carrierHint = 'TNT / FedEx';
+
+    // Toll
+    else if (/^(TOLL|TGE|TFM|TXF)\d*/.test(c)) carrierHint = 'Toll';
+
+    // Aramex (formerly Fastway)
+    else if (/^(FW|AUST|ARM)\d/.test(c)) carrierHint = 'Aramex';
+
+    // CouriersPlease
+    else if (/^CP\d/.test(c)) carrierHint = 'CouriersPlease';
+
+    // Amazon Logistics
+    else if (/^TBA\d{12}$/.test(c)) carrierHint = 'Amazon Logistics';
+
+    // USPS (US packages arriving in Australia)
+    else if (/^(9[234]\d{20}|[A-Z]{2}\d{9}US)$/.test(c)) carrierHint = 'USPS';
+
+    // Royal Mail (UK)
+    else if (/^[A-Z]{2}\d{9}GB$/i.test(c)) carrierHint = 'Royal Mail';
   }
   if (carrierHint && !document.getElementById('f-sender').value) {
     document.getElementById('f-sender').value = carrierHint;
