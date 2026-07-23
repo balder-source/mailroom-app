@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css"/>
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <!-- Firebase will be connected by your developer -->
 <!-- Demo login works fully without Firebase -->
@@ -468,6 +468,11 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
 .tl-pending { display: flex; gap: 12px; opacity: 0.4; }
 .tl-pending .tl-dot { background: var(--surface2); color: var(--text3); border: 2px dashed var(--border-med); }
 .tl-pending .tl-event { font-size: 13px; color: var(--text3); font-style: italic; }
+/* Hide default html5-qrcode UI we don't need */
+#scanner-qr-reader__scan_region { border: none !important; }
+#scanner-qr-reader__dashboard { display: none !important; }
+#scanner-qr-reader img { display: none !important; }
+#scanner-qr-reader video { object-fit: cover !important; width: 100% !important; height: 100% !important; }
 </style>
 </head>
 <body>
@@ -890,9 +895,9 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
     <button class="scanner-close" onclick="closeScanner()"><i class="ti ti-x"></i></button>
   </div>
   <div class="scanner-viewport">
-    <video id="scanner-video" autoplay playsinline muted></video>
+    <div id="scanner-qr-reader" style="width:100%;height:100%;position:absolute;inset:0"></div>
     <div class="scan-success" id="scan-success"></div>
-    <div class="scanner-ui">
+    <div class="scanner-ui" style="pointer-events:none">
       <div class="scanner-frame">
         <div class="scanner-corner tl"></div>
         <div class="scanner-corner tr"></div>
@@ -1775,56 +1780,81 @@ function updateVoPreview() {
 }
 
 // ── CAMERA SCANNER ────────────────────────────────────────────────
-let cameraStream = null;
-let scannerCodeReader = null;
+let html5QrScanner = null;
+let scannerActive = false;
 
 async function openScanner() {
   document.getElementById('scanner-overlay').classList.add('open');
   document.getElementById('scanner-manual-input').value = '';
-  // Try to start real camera
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-    cameraStream = stream;
-    const video = document.getElementById('scanner-video');
-    video.srcObject = stream;
-    video.play();
-    // Try ZXing if available (loaded below), else just show the UI
-    if (window.ZXing) startZXingScanner();
-  } catch(e) {
-    // Camera not available (desktop/permission denied) — silently continue, demo button still works
-  }
+  // Small delay to let the overlay render before starting camera
+  setTimeout(() => startHtml5Scanner(), 300);
 }
 
-function startZXingScanner() {
+function startHtml5Scanner() {
+  if (scannerActive) return;
+  if (typeof Html5Qrcode === 'undefined') {
+    showToast('Scanner loading — try again in a moment');
+    return;
+  }
   try {
-    const hints = new Map();
-    const formats = [
-      window.ZXing.BarcodeFormat.QR_CODE,
-      window.ZXing.BarcodeFormat.CODE_128,
-      window.ZXing.BarcodeFormat.CODE_39,
-      window.ZXing.BarcodeFormat.EAN_13,
-      window.ZXing.BarcodeFormat.UPC_A,
-      window.ZXing.BarcodeFormat.DATA_MATRIX,
-    ];
-    hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
-    scannerCodeReader = new window.ZXing.BrowserMultiFormatReader(hints);
-    scannerCodeReader.decodeFromVideoElement(
-      document.getElementById('scanner-video'),
-      (result, err) => {
-        if (result) onBarcodeDetected(result.getText());
+    html5QrScanner = new Html5Qrcode('scanner-qr-reader');
+    const config = {
+      fps: 15,
+      qrbox: { width: 250, height: 150 },
+      aspectRatio: window.innerHeight / window.innerWidth,
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.CODE_93,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.DATA_MATRIX,
+        Html5QrcodeSupportedFormats.ITF,
+        Html5QrcodeSupportedFormats.AZTEC,
+      ]
+    };
+    html5QrScanner.start(
+      { facingMode: 'environment' },
+      config,
+      (decodedText) => {
+        // Success — barcode detected
+        if (!scannerActive) return; // prevent double-fire
+        onBarcodeDetected(decodedText);
+      },
+      (errorMessage) => {
+        // Scan attempt failed — this fires constantly while scanning, ignore it
       }
-    );
-  } catch(e) {}
+    ).then(() => {
+      scannerActive = true;
+      // Hide the default html5-qrcode UI elements we don't want
+      const qrReader = document.getElementById('scanner-qr-reader');
+      if (qrReader) {
+        const header = qrReader.querySelector('#scanner-qr-reader__header_message');
+        if (header) header.style.display = 'none';
+      }
+    }).catch(err => {
+      showToast('Camera error — use manual entry below');
+    });
+  } catch(e) {
+    showToast('Scanner unavailable — use manual entry below');
+  }
 }
 
 function closeScanner() {
   document.getElementById('scanner-overlay').classList.remove('open');
-  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
-  if (scannerCodeReader) { try { scannerCodeReader.reset(); } catch(e) {} scannerCodeReader = null; }
+  scannerActive = false;
+  if (html5QrScanner) {
+    html5QrScanner.stop().catch(() => {}).finally(() => {
+      html5QrScanner.clear();
+      html5QrScanner = null;
+    });
+  }
 }
 
 function triggerDemoScan() {
-  // Simulate a real carrier barcode being detected
   const demoCodes = [
     { code:'FX829401827', carrier:'FedEx' },
     { code:'DHL5554321099', carrier:'DHL' },
@@ -1837,10 +1867,10 @@ function triggerDemoScan() {
 }
 
 function onBarcodeDetected(code, carrierHint) {
+  scannerActive = false; // prevent re-firing
   // Flash effect
   const flash = document.getElementById('scan-success');
-  flash.classList.add('flash');
-  setTimeout(() => flash.classList.remove('flash'), 400);
+  if (flash) { flash.classList.add('flash'); setTimeout(() => flash.classList.remove('flash'), 400); }
 
   // Fill tracking field
   document.getElementById('f-tracking').value = code;
@@ -1848,25 +1878,29 @@ function onBarcodeDetected(code, carrierHint) {
   // Auto-detect carrier from code pattern
   if (!carrierHint) {
     if (code.startsWith('1Z')) carrierHint = 'UPS';
-    else if (code.startsWith('FX') || code.startsWith('27') || code.startsWith('96')) carrierHint = 'FedEx';
-    else if (code.startsWith('DHL')) carrierHint = 'DHL';
-    else if (code.startsWith('AP')) carrierHint = 'Australia Post';
+    else if (code.startsWith('JD') || code.startsWith('61')) carrierHint = 'Australia Post';
+    else if (code.startsWith('FX') || code.startsWith('27') || code.startsWith('96') || code.startsWith('7489') || code.startsWith('7492')) carrierHint = 'FedEx';
+    else if (code.startsWith('DHL') || code.startsWith('JJD')) carrierHint = 'DHL';
+    else if (code.startsWith('AP') || code.startsWith('33') || code.startsWith('99')) carrierHint = 'Australia Post';
     else if (code.startsWith('ST')) carrierHint = 'StarTrack';
+    else if (code.startsWith('TBA')) carrierHint = 'Amazon';
   }
   if (carrierHint && !document.getElementById('f-sender').value) {
     document.getElementById('f-sender').value = carrierHint;
   }
 
-  // Close scanner after short delay so user sees the flash
+  // Close scanner and focus recipient search
   setTimeout(() => {
     closeScanner();
-    showToast('Barcode scanned — tracking number filled');
-    // Focus the name search so staff know to type the recipient name next
-    setTimeout(() => document.getElementById('sf-search').focus(), 300);
+    showToast('✓ Barcode scanned — tracking number filled');
+    setTimeout(() => {
+      const sf = document.getElementById('sf-search');
+      if (sf) sf.focus();
+    }, 300);
   }, 450);
 }
 
-// Allow manual entry in scanner to confirm with Enter
+// Allow manual entry in scanner with Enter key
 document.addEventListener('DOMContentLoaded', () => {
   const mi = document.getElementById('scanner-manual-input');
   if (mi) mi.addEventListener('keydown', e => {
