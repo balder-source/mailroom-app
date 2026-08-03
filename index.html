@@ -656,7 +656,7 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
 
     <!-- ACTIONS -->
     <div class="page" id="page-actions">
-      <div class="section-label">Pending customer instructions</div>
+      <div class="section-label">Pending member instructions</div>
       <div id="actions-list"></div>
     </div>
 
@@ -685,10 +685,17 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
           <input type="text" id="f-email" placeholder="e.g. sarah@company.com"/>
         </div>
         <div class="form-group">
-          <label>Customer type</label>
+          <label>Member type</label>
           <select id="f-category" onchange="onCategoryChange()">
             <option value="workspace">Full Time Member</option>
             <option value="virtual">Virtual Office</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Mail type</label>
+          <select id="f-mail-type" onchange="updateScanBoxLabel()">
+            <option value="package">📦 Package / Parcel</option>
+            <option value="letter">📄 Letter / Envelope</option>
           </select>
         </div>
         <div class="form-group">
@@ -696,21 +703,25 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
           <select id="f-pkg-location"></select>
         </div>
 
-        <div class="scan-box" onclick="openScanner()">
+        <div class="scan-box" onclick="openScanner()" id="scan-box-btn">
           <i class="ti ti-camera"></i>
           <div class="scan-box-label">
-            <div class="scan-box-title">Scan package barcode</div>
+            <div class="scan-box-title" id="scan-box-title">Scan package barcode</div>
             <div class="scan-box-sub">Opens camera — tracking number auto-fills</div>
           </div>
         </div>
 
         <div class="form-group">
-          <label>Tracking number</label>
+          <label>Tracking number <span style="font-size:11px;color:var(--text3)">(optional for letters)</span></label>
           <input type="text" id="f-tracking" placeholder="e.g. 1Z999AA10123456784"/>
         </div>
         <div class="form-group">
-          <label>Carrier / sender</label>
+          <label>Carrier</label>
           <input type="text" id="f-sender" placeholder="e.g. FedEx, DHL, Australia Post" oninput="updateVoPreview()"/>
+        </div>
+        <div class="form-group">
+          <label>Sender name <span style="font-size:11px;color:var(--text3)">(who sent it)</span></label>
+          <input type="text" id="f-sender-name" placeholder="e.g. ATO, Amazon, Mum" oninput="updateVoPreview()"/>
         </div>
         <div class="form-group">
           <label>Storage location</label>
@@ -725,8 +736,10 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
           <div class="section-label" style="margin-top:2px">Email preview — Virtual Office</div>
           <div class="email-preview">
             <strong>To:</strong> <span id="prev-email">[email]</span><br>
-            <strong>Subject:</strong> Package arrived — please advise<br><br>
-            Hi <strong id="prev-name">[Recipient]</strong>, a package has arrived from <strong id="prev-sender">[Carrier]</strong> at your office.<br><br>
+            <strong>Subject:</strong> <span id="prev-subject">You have mail — please advise</span><br><br>
+            Hi <strong id="prev-name">[Recipient]</strong>,<br><br>
+            <span id="prev-item-desc">A package</span> has arrived for you at your office<span id="prev-sender-wrap"> from <strong id="prev-sender-name">[Sender]</strong></span>.<br><br>
+            <strong>Reference:</strong> <span id="prev-ref">[Type — Sender — Date]</span><br><br>
             Please choose one of the following actions:<br>
             <span class="email-link">Keep / Store onsite</span><br>
             <span class="email-link">Destroy</span><br>
@@ -750,6 +763,8 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
       </div>
       <div class="filter-row" id="pkg-filter-row">
         <button class="filter-chip active" onclick="setPkgFilter('all',this)">All</button>
+        <button class="filter-chip" onclick="setPkgFilter('letter',this)">📄 Letters</button>
+        <button class="filter-chip" onclick="setPkgFilter('package',this)">📦 Packages</button>
         <button class="filter-chip" onclick="setPkgFilter('waiting',this)">Awaiting pickup</button>
         <button class="filter-chip" onclick="setPkgFilter('awaiting-reply',this)">Awaiting reply</button>
         <button class="filter-chip" onclick="setPkgFilter('pending-action',this)">Action needed</button>
@@ -770,6 +785,9 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
       </div>
       <div class="filter-row">
         <button class="filter-chip active" onclick="setHistFilter('all',this)">All</button>
+        <button class="filter-chip" onclick="setHistFilter('today',this)">📅 Collected today</button>
+        <button class="filter-chip" onclick="setHistFilter('letter',this)">📄 Letters</button>
+        <button class="filter-chip" onclick="setHistFilter('package',this)">📦 Packages</button>
         <button class="filter-chip" onclick="setHistFilter('workspace',this)">Full Time Member</button>
         <button class="filter-chip" onclick="setHistFilter('virtual',this)">Virtual Office</button>
         <button class="filter-chip" onclick="setHistFilter('action',this)">Had action</button>
@@ -1013,7 +1031,7 @@ let packages = [
     timeline:[
       { event:'Package logged', detail:'Scanned & logged at Collins Street by James Wu', time:'Today, 11:05 am', icon:'ti-package', color:'blue' },
       { event:'Notification sent', detail:'Virtual Office email sent to tom.baker@startupx.io with action links', time:'Today, 11:05 am', icon:'ti-mail', color:'purple' },
-      { event:'Customer replied', detail:'Tom Baker chose: Forward', time:'Today, 11:43 am', icon:'ti-send', color:'amber' }
+      { event:'Member replied', detail:'Tom Baker chose: Forward', time:'Today, 11:43 am', icon:'ti-send', color:'amber' }
     ]},
   { id:4, type:'in', recipient:'Aisha Patel', email:'aisha@lawpartners.com', company:'Law Partners', category:'workspace', pkgLocation:'Collins Street', sender:'UPS', tracking:'1Z999AA101234', storage:'Shelf B2', notes:'', date:'Yesterday, 3:22 pm', status:'collected', action:null,
     timeline:[
@@ -1025,7 +1043,7 @@ let packages = [
     timeline:[
       { event:'Package logged', detail:'Scanned & logged at George Street by Priya Nair', time:'Yesterday, 4:50 pm', icon:'ti-package', color:'blue' },
       { event:'Notification sent', detail:'Virtual Office email sent to d.nguyen@fintech.com with action links', time:'Yesterday, 4:50 pm', icon:'ti-mail', color:'purple' },
-      { event:'Customer replied', detail:'David Nguyen chose: Keep / Store onsite', time:'Yesterday, 5:12 pm', icon:'ti-building-warehouse', color:'amber' },
+      { event:'Member replied', detail:'David Nguyen chose: Keep / Store onsite', time:'Yesterday, 5:12 pm', icon:'ti-building-warehouse', color:'amber' },
       { event:'Action completed', detail:'Package stored onsite as requested', time:'Yesterday, 5:30 pm', icon:'ti-circle-check', color:'green' },
       { event:'Collected with signature', detail:'Collected by recipient. Signature captured.', time:'Today, 9:02 am', icon:'ti-writing', color:'green' }
     ]},
@@ -1198,7 +1216,7 @@ function renderDashboard() {
   let html = '';
   if (dashWaiting.length) html += dashWaiting.map(pkgCard).join('');
   if (dashAwaiting.length) {
-    html += `<div class="section-label" style="margin-top:${dashWaiting.length?'12px':'0'}">Awaiting customer reply</div>`;
+    html += `<div class="section-label" style="margin-top:${dashWaiting.length?'12px':'0'}">Awaiting member reply</div>`;
     html += dashAwaiting.map(pkgCard).join('');
   }
   el.innerHTML = html || empty('ti-inbox','No packages awaiting pickup');
@@ -1236,7 +1254,9 @@ function setPkgFilter(filter, btn) {
 
 function applyPkgFilters(pkgs) {
   let result = pkgs.filter(p => p.status !== 'collected');
-  if (pkgActiveFilter === 'waiting') result = result.filter(p => p.status === 'waiting');
+  if (pkgActiveFilter === 'letter') result = result.filter(p => p.mailType === 'letter');
+  else if (pkgActiveFilter === 'package') result = result.filter(p => !p.mailType || p.mailType === 'package');
+  else if (pkgActiveFilter === 'waiting') result = result.filter(p => p.status === 'waiting');
   else if (pkgActiveFilter === 'awaiting-reply') result = result.filter(p => p.status === 'awaiting-reply');
   else if (pkgActiveFilter === 'pending-action') result = result.filter(p => p.status === 'pending-action' || p.status === 'awaiting-reply');
   else if (pkgActiveFilter === 'outgoing') result = result.filter(p => p.status === 'outgoing');
@@ -1303,7 +1323,10 @@ function hl(text, query) {
 function renderHistory() {
   let pkgs = filteredPkgs().filter(p => p.status === 'collected');
   const total = pkgs.length;
-  if (histActiveFilter === 'workspace') pkgs = pkgs.filter(p => p.category === 'workspace');
+  if (histActiveFilter === 'today') pkgs = pkgs.filter(p => p.date.startsWith('Today'));
+  else if (histActiveFilter === 'letter') pkgs = pkgs.filter(p => p.mailType === 'letter');
+  else if (histActiveFilter === 'package') pkgs = pkgs.filter(p => !p.mailType || p.mailType === 'package');
+  else if (histActiveFilter === 'workspace') pkgs = pkgs.filter(p => p.category === 'workspace');
   else if (histActiveFilter === 'virtual') pkgs = pkgs.filter(p => p.category === 'virtual');
   else if (histActiveFilter === 'action') pkgs = pkgs.filter(p => p.action);
   if (histSearchQuery) {
@@ -1334,8 +1357,10 @@ function renderHistory() {
           <i class="ti ti-chevron-right" style="font-size:16px;color:var(--text3)"></i>
         </div>
       </div>
-      <div class="hist-meta">${hl(p.sender, q)} · ${hl(p.tracking, q)}${p.company ? ' · ' + hl(p.company, q) : ''}</div>
+      <div class="hist-meta">${hl(p.sender || '', q)}${p.senderName ? ' · From: ' + hl(p.senderName, q) : ''} · ${hl(p.tracking, q)}${p.company ? ' · ' + hl(p.company, q) : ''}</div>
+      ${p.itemRef ? `<div style="font-size:11px;color:var(--text3);margin-bottom:4px">${p.itemRef}</div>` : ''}
       <div class="hist-tags">
+        <span class="badge ${p.mailType === 'letter' ? 'gray' : 'blue'}">${p.mailType === 'letter' ? '📄 Letter' : '📦 Package'}</span>
         ${catBadge(p.category)}
         <span class="badge gray"><i class="ti ti-map-pin"></i>${p.pkgLocation}</span>
         ${p.action ? `<span class="badge green"><i class="ti ${ACTION_ICONS[p.action]}"></i>${p.action}</span>` : ''}
@@ -1347,18 +1372,21 @@ function renderHistory() {
 // ── PKG CARD ──────────────────────────────────────────────────────
 function pkgCard(p, query) {
   const urgent = p.status === 'pending-action' && !p.action;
+  const isLetter = p.mailType === 'letter';
   const iconMap = { 'pending-action':'red', 'awaiting-reply':'amber', 'outgoing':'amber', 'collected':'gray', 'waiting':'blue' };
   const iconClass = iconMap[p.status] || 'blue';
-  const iconName = urgent ? 'ti-alert-circle' : p.status === 'awaiting-reply' ? 'ti-clock' : p.type === 'out' ? 'ti-send' : p.status === 'collected' ? 'ti-check' : 'ti-package';
+  const iconName = urgent ? 'ti-alert-circle' : p.status === 'awaiting-reply' ? 'ti-clock' : p.type === 'out' ? 'ti-send' : p.status === 'collected' ? 'ti-circle-check' : isLetter ? 'ti-mail' : 'ti-package';
   const q = query || '';
   const name = hl(p.recipient, q);
   const company = p.company ? ' <span style="font-weight:400;color:var(--text2)">· ' + hl(p.company, q) + '</span>' : '';
-  const meta = hl(p.sender, q) + ' · ' + p.pkgLocation + ' · ' + p.date;
+  const senderDisplay = p.senderName ? `${p.sender ? p.sender + ' · ' : ''}From: ${hl(p.senderName, q)}` : hl(p.sender || '', q);
+  const meta = senderDisplay + ' · ' + p.pkgLocation + ' · ' + p.date;
   return `<div class="pkg-card${urgent ? ' urgent' : ''}" onclick="showDetail(${p.id})">
     <div class="pkg-icon ${iconClass}"><i class="ti ${iconName}"></i></div>
     <div class="pkg-info">
       <div class="pkg-name">${name}${company}</div>
       <div class="pkg-meta">${meta}</div>
+      ${p.itemRef ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">${p.itemRef}</div>` : ''}
     </div>
     <div class="pkg-right">${statusBadge(p)}${catBadge(p.category)}</div>
   </div>`;
@@ -1409,15 +1437,15 @@ function buildActionCompletion(p) {
 
   if (action === 'Keep / Store onsite') {
     return `<div class="action-complete-box store">
-      <div class="action-complete-label store"><i class="ti ti-building-warehouse"></i>Customer requested: Keep / Store onsite</div>
-      <div style="font-size:12px;color:var(--green-text);margin-bottom:10px">Store the package at ${p.storage || 'your location'} and collect with signature when the customer comes in.</div>
+      <div class="action-complete-label store"><i class="ti ti-building-warehouse"></i>Member requested: Keep / Store onsite</div>
+      <div style="font-size:12px;color:var(--green-text);margin-bottom:10px">Store the package at ${p.storage || 'your location'} and collect with signature when the member comes in.</div>
     </div>
     <button class="btn primary" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
   }
 
   if (action === 'Destroy') {
     return `<div class="action-complete-box destroy">
-      <div class="action-complete-label destroy"><i class="ti ti-trash"></i>Customer requested: Destroy</div>
+      <div class="action-complete-label destroy"><i class="ti ti-trash"></i>Member requested: Destroy</div>
       <div style="font-size:12px;color:var(--red-text);margin-bottom:10px">Securely destroy the package and confirm below. This action is permanent and will be recorded in the timeline.</div>
     </div>
     <button class="btn destroy" onclick="completeAction(${p.id},'Destroy','Package securely destroyed by team','ti-trash','red')">
@@ -1427,7 +1455,7 @@ function buildActionCompletion(p) {
 
   if (action === 'Scan to email') {
     return `<div class="action-complete-box scan">
-      <div class="action-complete-label scan"><i class="ti ti-mail"></i>Customer requested: Scan to email</div>
+      <div class="action-complete-label scan"><i class="ti ti-mail"></i>Member requested: Scan to email</div>
       <div style="font-size:12px;color:var(--blue-text);margin-bottom:10px">Scan the contents and email to ${p.email || p.recipient}, then confirm below.</div>
     </div>
     <button class="btn scan-email" onclick="completeAction(${p.id},'Scan to email','Package scanned and emailed to ${p.email || p.recipient}','ti-mail','blue')">
@@ -1439,7 +1467,7 @@ function buildActionCompletion(p) {
     const savedAddr = getForwardingAddress(p.email);
     const hasSaved = !!savedAddr;
     return `<div class="action-complete-box forward">
-      <div class="action-complete-label forward"><i class="ti ti-send"></i>Customer requested: Forward</div>
+      <div class="action-complete-label forward"><i class="ti ti-send"></i>Member requested: Forward</div>
       <div class="forward-address-wrap">
         <label>Forwarding address</label>
         <input class="forward-address-input" id="forward-addr-${p.id}" placeholder="Street, Suburb, State, Postcode" value="${savedAddr}"/>
@@ -1566,7 +1594,7 @@ function buildTimeline(p) {
 
   if (!isDone) {
     if (p.status === 'awaiting-reply' && isVO) {
-      pendingSteps.push({ event: 'Awaiting customer reply', icon: 'ti-clock' });
+      pendingSteps.push({ event: 'Awaiting member reply', icon: 'ti-clock' });
       pendingSteps.push({ event: 'Action to be completed by team', icon: 'ti-circle-check' });
       pendingSteps.push({ event: 'Collection with signature', icon: 'ti-writing' });
     } else if (p.status === 'pending-action' && !p.action) {
@@ -1629,10 +1657,13 @@ function showDetail(id) {
   const rows = [
     ['Recipient', p.recipient],
     p.company ? ['Company', p.company] : null,
+    ['Mail type', p.mailType === 'letter' ? '📄 Letter' : '📦 Package'],
+    ['Reference', p.itemRef || '—'],
     ['Category', p.category === 'virtual' ? 'Virtual Office' : 'Full Time Member'],
     ['Status', p.status === 'pending-action' ? (p.action ? p.action : 'Action needed') : p.status === 'awaiting-reply' ? 'Awaiting reply' : p.status === 'collected' ? '✓ Collected' : p.status === 'waiting' ? 'Awaiting pickup' : p.status.charAt(0).toUpperCase()+p.status.slice(1)],
     ['Office', p.pkgLocation],
-    ['Carrier', p.sender],
+    ['Carrier', p.sender || '—'],
+    p.senderName ? ['Sender', p.senderName] : null,
     ['Tracking', p.tracking],
     p.storage ? ['Storage', p.storage] : null,
     p.notes ? ['Notes', p.notes] : null,
@@ -1646,7 +1677,7 @@ function showDetail(id) {
     extra = buildActionCompletion(p);
   } else if (p.status === 'pending-action' && !p.action) {
     extra = `<div style="background:var(--red-bg);border:1px solid #FECACA;border-radius:var(--radius-sm);padding:12px;margin-bottom:10px">
-      <div style="font-size:12px;font-weight:600;color:var(--red-text);margin-bottom:10px">Awaiting customer instruction</div>
+      <div style="font-size:12px;font-weight:600;color:var(--red-text);margin-bottom:10px">Awaiting member instruction</div>
       <div class="action-grid">
         ${ACTION_LIST.map(a=>`<button class="action-btn" onclick="simulateReply(${p.id},'${a}')"><i class="ti ${ACTION_ICONS[a]}"></i>${a}</button>`).join('')}
       </div>
@@ -1655,11 +1686,11 @@ function showDetail(id) {
     extra = `<div style="background:var(--amber-bg);border:1px solid #FDE68A;border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
       <i class="ti ti-clock" style="font-size:20px;color:var(--amber);flex-shrink:0"></i>
       <div>
-        <div style="font-size:13px;font-weight:600;color:var(--amber-text)">Awaiting customer reply</div>
+        <div style="font-size:13px;font-weight:600;color:var(--amber-text)">Awaiting member reply</div>
         <div style="font-size:12px;color:var(--amber-text);margin-top:2px">Notification sent to ${p.email || p.recipient}</div>
       </div>
     </div>
-    <button class="btn secondary" onclick="simulateReply(${p.id},null)">Simulate customer reply</button>
+    <button class="btn secondary" onclick="simulateReply(${p.id},null)">Simulate member reply</button>
     <button class="btn primary" style="margin-top:8px" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
   } else if (p.status === 'waiting' && p.category === 'virtual') {
     extra = `<div style="margin-bottom:10px">
@@ -1675,7 +1706,7 @@ function showDetail(id) {
         <span class="email-link">Forward</span>
       </div>
     </div>
-    <button class="btn secondary" onclick="simulateReply(${p.id},null)">Simulate customer reply</button>
+    <button class="btn secondary" onclick="simulateReply(${p.id},null)">Simulate member reply</button>
     <button class="btn primary" style="margin-top:8px" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
   } else if (p.status === 'waiting') {
     extra = `<button class="btn primary" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
@@ -1727,9 +1758,9 @@ async function simulateReply(id, action) {
   const chosen = action || ACTION_LIST[Math.floor(Math.random() * ACTION_LIST.length)];
   p.status = 'pending-action';
   p.action = chosen;
-  addTimelineEvent(p, 'Customer replied', `${p.recipient} chose: ${chosen}`, ACTION_ICONS[chosen] || 'ti-message', 'amber');
+  addTimelineEvent(p, 'Member replied', `${p.recipient} chose: ${chosen}`, ACTION_ICONS[chosen] || 'ti-message', 'amber');
   if (window.updatePackageInFirestore) await window.updatePackageInFirestore(p, { status:'pending-action', action: chosen, timeline: p.timeline });
-  showToast('Customer replied: ' + chosen);
+  showToast('Member replied: ' + chosen);
   updateBadges();
   showDetail(id);
 }
@@ -1776,10 +1807,46 @@ function onCategoryChange() {
   updateVoPreview();
 }
 
+function updateScanBoxLabel() {
+  const type = document.getElementById('f-mail-type').value;
+  const title = document.getElementById('scan-box-title');
+  if (title) title.textContent = type === 'letter' ? 'Scan letter barcode / QR code' : 'Scan package barcode';
+}
+
 function updateVoPreview() {
-  document.getElementById('prev-name').textContent = document.getElementById('f-recipient').value || '[Recipient]';
-  document.getElementById('prev-sender').textContent = document.getElementById('f-sender').value || '[Carrier]';
-  document.getElementById('prev-email').textContent = document.getElementById('f-email').value || '[email]';
+  const name = document.getElementById('f-recipient').value || '[Recipient]';
+  const carrier = document.getElementById('f-sender').value || '';
+  const senderName = document.getElementById('f-sender-name').value || '';
+  const email = document.getElementById('f-email').value || '[email]';
+  const mailType = document.getElementById('f-mail-type') ? document.getElementById('f-mail-type').value : 'package';
+  const isLetter = mailType === 'letter';
+  const typeLabel = isLetter ? 'letter' : 'package';
+  const typeIcon = isLetter ? '📄' : '📦';
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-AU', { day:'numeric', month:'short' });
+  const refParts = [isLetter ? 'Letter' : 'Package'];
+  if (senderName) refParts.push('from ' + senderName);
+  refParts.push(dateStr);
+  const ref = refParts.join(' — ');
+
+  document.getElementById('prev-name').textContent = name;
+  document.getElementById('prev-email').textContent = email;
+  document.getElementById('prev-subject').textContent = `You have a ${typeLabel} — please advise`;
+  document.getElementById('prev-item-desc').textContent = `${typeIcon} A ${typeLabel}`;
+  document.getElementById('prev-ref').textContent = ref;
+
+  const senderWrap = document.getElementById('prev-sender-wrap');
+  const senderNameEl = document.getElementById('prev-sender-name');
+  if (senderName) {
+    senderWrap.style.display = 'inline';
+    senderNameEl.textContent = senderName;
+  } else if (carrier) {
+    senderWrap.style.display = 'inline';
+    senderNameEl.textContent = carrier;
+  } else {
+    senderWrap.style.display = 'none';
+  }
 }
 
 // ── CAMERA SCANNER ────────────────────────────────────────────────
@@ -1957,37 +2024,47 @@ let stagingBatch = [];
 
 async function stagePackage() {
   const type = document.getElementById('f-type').value;
+  const mailType = document.getElementById('f-mail-type').value;
   const recipient = document.getElementById('f-recipient').value.trim();
   const email = document.getElementById('f-email').value.trim();
   const category = document.getElementById('f-category').value;
   const pkgLocation = document.getElementById('f-pkg-location').value;
   const tracking = document.getElementById('f-tracking').value.trim();
   const sender = document.getElementById('f-sender').value.trim();
+  const senderName = document.getElementById('f-sender-name').value.trim();
   const storage = document.getElementById('f-storage').value.trim();
   const notes = document.getElementById('f-notes').value.trim();
-  if (!recipient || !sender) { showToast('Please fill in recipient and carrier'); return; }
+  if (!recipient) { showToast('Please fill in recipient name'); return; }
+  if (!sender && !senderName) { showToast('Please fill in carrier or sender name'); return; }
 
   const now = new Date();
   const timeStr = 'Today, ' + now.toLocaleTimeString('en-AU', { hour:'numeric', minute:'2-digit', hour12:true }).toLowerCase();
+  const dateStr = now.toLocaleDateString('en-AU', { day:'numeric', month:'short' });
+  const isLetter = mailType === 'letter';
+  const typeLabel = isLetter ? 'Letter' : 'Package';
+  const refParts = [typeLabel];
+  if (senderName) refParts.push('from ' + senderName);
+  refParts.push(dateStr);
+  const itemRef = refParts.join(' — ');
+
   const staged = {
-    id: nextId++, type, recipient, email, company:'', category,
-    pkgLocation, sender, tracking: tracking || 'Manual entry',
+    id: nextId++, type, mailType, recipient, email, company:'', category,
+    pkgLocation, sender, senderName, itemRef, tracking: tracking || (isLetter ? 'Letter — no tracking' : 'Manual entry'),
     storage, notes, date: timeStr,
     status: type === 'out' ? 'outgoing' : (category === 'virtual' ? 'awaiting-reply' : 'waiting'),
     action: null, loggedBy: currentUser?.name || 'Staff', createdAt: now.toISOString(),
     timeline: []
   };
 
-  // Record log event
   const logEvent = type === 'out'
     ? { event:'Outgoing mail logged', detail:`Logged at ${pkgLocation} by ${currentUser?.name || 'Staff'}`, icon:'ti-send', color:'amber' }
-    : { event:'Package logged', detail:`Scanned & logged at ${pkgLocation} by ${currentUser?.name || 'Staff'}`, icon:'ti-package', color:'blue' };
+    : { event:`${typeLabel} logged`, detail:`${itemRef} — logged at ${pkgLocation} by ${currentUser?.name || 'Staff'}`, icon: isLetter ? 'ti-mail' : 'ti-package', color:'blue' };
   addTimelineEvent(staged, logEvent.event, logEvent.detail, logEvent.icon, logEvent.color);
 
   // Record notification event
   if (type !== 'out') {
     if (category === 'virtual') {
-      addTimelineEvent(staged, 'Notification sent', `Virtual Office email sent to ${email || recipient} with action links`, 'ti-mail', 'purple');
+      addTimelineEvent(staged, 'Notification sent', `Virtual Office email sent to ${email || recipient} — Ref: ${itemRef}`, 'ti-mail', 'purple');
     } else {
       addTimelineEvent(staged, 'Notification sent', `Arrival email sent to ${email || recipient}`, 'ti-mail', 'blue');
     }
@@ -1996,7 +2073,13 @@ async function stagePackage() {
   stagingBatch.push(staged);
   packages.push(staged);
 
-  clearAddForm();
+  ['f-recipient','f-email','f-tracking','f-sender','f-sender-name','f-storage','f-notes','sf-search'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
+  document.getElementById('f-category').value = 'workspace';
+  document.getElementById('f-mail-type').value = 'package';
+  updateScanBoxLabel();
+  document.getElementById('vo-preview-wrap').style.display = 'none';
   renderStagingBar();
   showToast(`${recipient} added to batch`);
   updateBadges();
@@ -2372,7 +2455,7 @@ function renderReports() {
   const voDash = (d.vo / total) * circumference;
   const wsDash = (d.ws / total) * circumference;
   document.getElementById('report-type-chart').innerHTML = `
-    <div class="chart-title">Customer type split — ${locationLabel}</div>
+    <div class="chart-title">Member type split — ${locationLabel}</div>
     <div class="donut-wrap">
       <svg class="donut-svg" width="100" height="100" viewBox="0 0 100 100">
         <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#F0EEE9" stroke-width="14"/>
@@ -2413,8 +2496,8 @@ function renderReports() {
   // Avg times
   document.getElementById('report-avgtime-chart').innerHTML = `
     <div class="chart-title">Avg collection time — ${locationLabel}</div>
-    <div class="avg-time-row"><div class="avg-time-label">Full Time Member customers</div><div class="avg-time-val">${(d.avgHours * 0.7).toFixed(1)}h</div></div>
-    <div class="avg-time-row"><div class="avg-time-label">Virtual Office customers</div><div class="avg-time-val">${(d.avgHours * 1.4).toFixed(1)}h</div></div>
+    <div class="avg-time-row"><div class="avg-time-label">Full Time Members</div><div class="avg-time-val">${(d.avgHours * 0.7).toFixed(1)}h</div></div>
+    <div class="avg-time-row"><div class="avg-time-label">Virtual Office members</div><div class="avg-time-val">${(d.avgHours * 1.4).toFixed(1)}h</div></div>
     <div class="avg-time-row"><div class="avg-time-label">Overall average</div><div class="avg-time-val">${d.avgHours}h</div></div>
     <div class="avg-time-row"><div class="avg-time-label">Longest wait (this period)</div><div class="avg-time-val">${(d.avgHours * 4.2).toFixed(1)}h</div></div>
   `;
