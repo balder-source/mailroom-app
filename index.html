@@ -895,7 +895,10 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
 <div class="sig-overlay" id="sig-overlay">
   <div class="sig-sheet">
     <div class="sig-handle"></div>
-    <div class="sig-title" id="sig-title">Signature required</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
+      <div class="sig-title" id="sig-title">Signature required</div>
+      <button onclick="document.getElementById('sig-overlay').classList.remove('open')" style="background:none;border:none;cursor:pointer;color:var(--text2);font-size:22px;line-height:1;padding:0"><i class="ti ti-x"></i></button>
+    </div>
     <div class="sig-sub" id="sig-sub">Please sign below to confirm collection</div>
     <div class="sig-canvas-wrap">
       <canvas id="sig-canvas"></canvas>
