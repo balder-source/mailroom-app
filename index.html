@@ -96,9 +96,17 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
 /* ── STAT ROW ── */
 .stat-row { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-bottom: 14px; }
 .stat-card { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 12px 14px; }
+.stat-card-btn { cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.stat-card-btn:active { box-shadow: var(--shadow); border-color: var(--border-med); }
 .stat-label { font-size: 11px; color: var(--text3); margin-bottom: 4px; font-weight: 500; }
-.stat-num { font-size: 26px; font-weight: 600; color: var(--text); font-family: 'DM Mono', monospace; letter-spacing: -1px; line-height: 1; }
+.stat-num { font-size: 26px; font-weight: 600; color: var(--text); font-family: 'DM Mono', monospace; letter-spacing: -1px; line-height: 1; margin-bottom: 6px; }
 .stat-num.red { color: var(--red); }
+.stat-hint { font-size: 11px; color: var(--blue-text); font-weight: 500; display: flex; align-items: center; gap: 3px; }
+.stat-hint i { font-size: 12px; }
+.all-clear { text-align: center; padding: 28px 20px; }
+.all-clear i { font-size: 40px; color: var(--green); display: block; margin-bottom: 10px; }
+.all-clear-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.all-clear-sub { font-size: 13px; color: var(--text3); }
 .stat-num.green { color: var(--green); }
 
 /* ── PKG CARDS ── */
@@ -134,6 +142,18 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
 /* ── FORMS ── */
 .form-group { margin-bottom: 13px; }
 .form-group label { display: block; font-size: 12px; font-weight: 500; color: var(--text2); margin-bottom: 5px; }
+/* ── NOTIFICATION TOGGLE ── */
+.notif-toggle-row { display: flex; align-items: center; justify-content: space-between; background: var(--surface); border: 1px solid var(--border-med); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 13px; }
+.notif-toggle-label { font-size: 13px; font-weight: 500; color: var(--text); }
+.notif-toggle-sub { font-size: 11px; color: var(--text3); margin-top: 1px; }
+.toggle-switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-track { position: absolute; inset: 0; background: var(--border-med); border-radius: 99px; cursor: pointer; transition: background .2s; }
+.toggle-track:before { content:''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .2s; }
+.toggle-switch input:checked + .toggle-track { background: var(--green); }
+.toggle-switch input:checked + .toggle-track:before { transform: translateX(18px); }
+.manual-notif-box { background: var(--amber-bg); border: 1px solid #FDE68A; border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; }
+.manual-notif-box-title { font-size: 12px; font-weight: 600; color: var(--amber-text); margin-bottom:6px; display:flex; align-items:center; gap:6px; }
 .form-group input, .form-group select { width: 100%; font-size: 14px; padding: 9px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border-med); background: var(--surface); color: var(--text); font-family: 'DM Sans', sans-serif; outline: none; transition: border-color .15s; }
 .form-group input:focus, .form-group select:focus { border-color: var(--accent); }
 .scan-box { border: 1.5px dashed var(--border-med); border-radius: var(--radius); padding: 16px; text-align: center; color: var(--text2); font-size: 13px; margin-bottom: 13px; cursor: pointer; transition: background .15s; display: flex; align-items: center; justify-content: center; gap: 10px; }
@@ -250,6 +270,16 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
 .filter-chip { flex-shrink: 0; padding: 5px 12px; border-radius: 99px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-med); background: var(--surface); color: var(--text2); cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; font-family: 'DM Sans', sans-serif; }
 .filter-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .results-meta { font-size: 12px; color: var(--text3); margin-bottom: 10px; }
+/* ── DATE RANGE FILTER ── */
+.date-range-row { display: flex; gap: 6px; margin-bottom: 8px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; scrollbar-width: none; align-items: center; }
+.date-range-row::-webkit-scrollbar { display: none; }
+.date-chip { flex-shrink: 0; padding: 5px 12px; border-radius: 99px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-med); background: var(--surface); color: var(--text2); cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; font-family: 'DM Sans', sans-serif; }
+.date-chip.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+.date-custom-wrap { display: none; gap: 6px; align-items: center; margin-bottom: 8px; }
+.date-custom-wrap.show { display: flex; }
+.date-input { border: 1px solid var(--border-med); border-radius: var(--radius-sm); padding: 5px 8px; font-size: 12px; font-family: 'DM Sans', sans-serif; color: var(--text); background: var(--surface); flex: 1; min-width: 0; }
+.date-input:focus { outline: none; border-color: var(--blue); }
+.date-sep { font-size: 12px; color: var(--text3); flex-shrink: 0; }
 .highlight { background: #FEF08A; border-radius: 2px; padding: 0 1px; }
 .hist-item { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 12px 14px; margin-bottom: 8px; }
 .hist-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 5px; }
@@ -642,22 +672,42 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
       </div>
       <div id="dash-search-results" style="display:none"></div>
       <div id="dash-main">
-        <div id="dash-alert"></div>
+        <div class="section-label">Today's overview</div>
         <div class="stat-row">
-          <div class="stat-card"><div class="stat-label">Awaiting pickup</div><div class="stat-num" id="s-waiting">0</div></div>
-          <div class="stat-card"><div class="stat-label">Action needed</div><div class="stat-num" id="s-actions">0</div></div>
-          <div class="stat-card"><div class="stat-label">Collected today</div><div class="stat-num" id="s-collected">0</div></div>
-          <div class="stat-card"><div class="stat-label">This week</div><div class="stat-num" id="s-total">0</div></div>
+          <div class="stat-card stat-card-btn" onclick="showPage('packages')" title="View all awaiting pickup">
+            <div class="stat-label">Awaiting pickup</div>
+            <div class="stat-num" id="s-waiting">0</div>
+            <div class="stat-hint">View packages <i class="ti ti-arrow-right"></i></div>
+          </div>
+          <div class="stat-card stat-card-btn" onclick="showPage('actions')" title="View actions needed">
+            <div class="stat-label">Action needed</div>
+            <div class="stat-num" id="s-actions">0</div>
+            <div class="stat-hint">View actions <i class="ti ti-arrow-right"></i></div>
+          </div>
+          <div class="stat-card stat-card-btn" onclick="showPage('history')" title="View collected today">
+            <div class="stat-label">Collected today</div>
+            <div class="stat-num" id="s-collected">0</div>
+            <div class="stat-hint">View history <i class="ti ti-arrow-right"></i></div>
+          </div>
+          <div class="stat-card stat-card-btn" onclick="showPage('packages')" title="View all packages">
+            <div class="stat-label">Logged this week</div>
+            <div class="stat-num" id="s-total">0</div>
+            <div class="stat-hint">View all <i class="ti ti-arrow-right"></i></div>
+          </div>
         </div>
-        <div class="section-label">Awaiting pickup</div>
-        <div id="dash-list"></div>
+        <div id="dash-alert"></div>
+        <div id="dash-status"></div>
       </div>
     </div>
 
     <!-- ACTIONS -->
     <div class="page" id="page-actions">
-      <div class="section-label">Pending member instructions</div>
-      <div id="actions-list"></div>
+      <div class="section-label">Action needed — member has replied</div>
+      <div id="actions-list-urgent"></div>
+      <div class="section-label" style="margin-top:16px">Contact member manually</div>
+      <div id="actions-list-manual"></div>
+      <div class="section-label" style="margin-top:16px">Pending member instructions</div>
+      <div id="actions-list-waiting"></div>
     </div>
 
     <!-- LOG NEW -->
@@ -716,7 +766,7 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
           <input type="text" id="f-tracking" placeholder="e.g. 1Z999AA10123456784"/>
         </div>
         <div class="form-group">
-          <label>Carrier</label>
+          <label id="f-sender-label">Carrier</label>
           <input type="text" id="f-sender" placeholder="e.g. FedEx, DHL, Australia Post" oninput="updateVoPreview()"/>
         </div>
         <div class="form-group">
@@ -746,6 +796,17 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
             <span class="email-link">Scan to email</span><br>
             <span class="email-link">Forward</span>
           </div>
+        </div>
+
+        <div class="notif-toggle-row" id="notif-toggle-wrap">
+          <div>
+            <div class="notif-toggle-label">Send arrival notification</div>
+            <div class="notif-toggle-sub" id="notif-toggle-sub">Member will be emailed automatically</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="f-send-notif" checked onchange="onNotifToggle()"/>
+            <span class="toggle-track"></span>
+          </label>
         </div>
 
         <button class="btn primary" style="margin-top:14px" onclick="stagePackage()">
@@ -782,6 +843,18 @@ html, body { height: 100%; background: var(--bg); font-family: 'DM Sans', sans-s
         <i class="ti ti-search search-icon"></i>
         <input class="search-bar" id="hist-search" type="text" placeholder="Search name, tracking, carrier…" oninput="onHistSearch(this.value)" autocomplete="off"/>
         <button class="search-clear" id="hist-search-clear" onclick="clearHistSearch()"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="date-range-row">
+        <button class="date-chip active" onclick="setHistDateRange('7d',this)">Last 7 days</button>
+        <button class="date-chip" onclick="setHistDateRange('30d',this)">Last 30 days</button>
+        <button class="date-chip" onclick="setHistDateRange('90d',this)">Last 90 days</button>
+        <button class="date-chip" onclick="setHistDateRange('all',this)">All time</button>
+        <button class="date-chip" onclick="setHistDateRange('custom',this)">Custom…</button>
+      </div>
+      <div class="date-custom-wrap" id="hist-custom-wrap">
+        <input class="date-input" type="date" id="hist-date-from" onchange="applyCustomRange()"/>
+        <span class="date-sep">→</span>
+        <input class="date-input" type="date" id="hist-date-to" onchange="applyCustomRange()"/>
       </div>
       <div class="filter-row">
         <button class="filter-chip active" onclick="setHistFilter('all',this)">All</button>
@@ -1177,8 +1250,26 @@ function filteredPkgs() {
   return packages.filter(p => p.pkgLocation === viewLocation);
 }
 
+// ── AUTO-MOVE TO MAILROOM AFTER 24 HOURS ──────────────────────────
+function autoMoveToMailroom() {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000; // 24 hours ago
+  packages.forEach(p => {
+    if (p.status === 'collected' || p.status === 'outgoing') return;
+    if (p.storage === 'Mailroom') return; // already moved
+    const created = p.createdAt ? new Date(p.createdAt).getTime() : null;
+    if (!created) return; // demo data without createdAt — skip
+    if (created <= cutoff) {
+      const old = p.storage;
+      p.storage = 'Mailroom';
+      addTimelineEvent(p, 'Moved to Mailroom', `Storage updated from "${old || 'unspecified'}" to Mailroom — uncollected after 24 hours`, 'ti-building-store', 'amber');
+      if (window.updatePackageInFirestore) window.updatePackageInFirestore(p, { storage: 'Mailroom', timeline: p.timeline });
+    }
+  });
+}
+
 // ── RENDER ALL ────────────────────────────────────────────────────
 function renderAll() {
+  autoMoveToMailroom();
   renderDashboard();
   renderActions();
   renderPackages();
@@ -1187,7 +1278,7 @@ function renderAll() {
 }
 
 function updateBadges() {
-  const n = filteredPkgs().filter(p => p.status === 'pending-action').length;
+  const n = filteredPkgs().filter(p => p.status === 'pending-action' || p.status === 'awaiting-reply').length;
   document.getElementById('notif-dot').className = 'notif-dot' + (n > 0 ? ' on' : '');
   document.getElementById('nav-dot').className = 'nav-dot' + (n > 0 ? ' on' : '');
 }
@@ -1196,39 +1287,63 @@ function updateBadges() {
 function renderDashboard() {
   const pkgs = filteredPkgs();
   const waiting = pkgs.filter(p => p.status === 'waiting' || p.status === 'awaiting-reply');
-  const actions = pkgs.filter(p => p.status === 'pending-action');
+  const actionNeeded = pkgs.filter(p => p.status === 'pending-action');
+  const awaitingReply = pkgs.filter(p => p.status === 'awaiting-reply');
   const collected = pkgs.filter(p => p.status === 'collected' && p.date.startsWith('Today'));
+
+  // Stat: awaiting pickup = waiting + awaiting-reply
   document.getElementById('s-waiting').textContent = waiting.length;
 
-  // Action needed: green if 0, red if ≥1
+  // Stat: action needed = pending-action + awaiting-reply
+  const totalActions = actionNeeded.length + awaitingReply.length;
   const actionsEl = document.getElementById('s-actions');
-  actionsEl.textContent = actions.length;
-  actionsEl.className = 'stat-num ' + (actions.length >= 1 ? 'red' : 'green');
+  actionsEl.textContent = totalActions;
+  actionsEl.className = 'stat-num ' + (totalActions >= 1 ? 'red' : 'green');
 
   document.getElementById('s-collected').textContent = collected.length;
-  document.getElementById('s-total').textContent = pkgs.length;
 
+  // This week = all non-outgoing packages
+  const thisWeek = pkgs.filter(p => p.status !== 'outgoing').length;
+  document.getElementById('s-total').textContent = thisWeek;
+
+  // Alert banner for urgent actions
   const alertEl = document.getElementById('dash-alert');
-  alertEl.innerHTML = actions.length > 0
-    ? `<div class="alert-banner" onclick="showPage('actions')"><i class="ti ti-alert-circle"></i><div class="alert-banner-text">${actions.length} Virtual Office package${actions.length>1?'s':''} need${actions.length===1?'s':''} your attention</div><i class="ti ti-chevron-right" style="margin-left:auto;color:var(--red)"></i></div>`
+  alertEl.innerHTML = actionNeeded.length > 0
+    ? `<div class="alert-banner" onclick="showPage('actions')"><i class="ti ti-alert-circle"></i><div class="alert-banner-text">${actionNeeded.length} item${actionNeeded.length>1?'s':''} need${actionNeeded.length===1?'s':''} your attention now</div><i class="ti ti-chevron-right" style="margin-left:auto;color:var(--red)"></i></div>`
     : '';
 
-  const el = document.getElementById('dash-list');
-  const dashWaiting = pkgs.filter(p => p.status === 'waiting');
-  const dashAwaiting = pkgs.filter(p => p.status === 'awaiting-reply');
-  let html = '';
-  if (dashWaiting.length) html += dashWaiting.map(pkgCard).join('');
-  if (dashAwaiting.length) {
-    html += `<div class="section-label" style="margin-top:${dashWaiting.length?'12px':'0'}">Awaiting member reply</div>`;
-    html += dashAwaiting.map(pkgCard).join('');
+  // All-clear or pending summary
+  const statusEl = document.getElementById('dash-status');
+  if (totalActions === 0 && waiting.length === 0) {
+    statusEl.innerHTML = `<div class="all-clear">
+      <i class="ti ti-circle-check"></i>
+      <div class="all-clear-title">All clear!</div>
+      <div class="all-clear-sub">No packages awaiting pickup or action. ${collected.length > 0 ? collected.length + ' collected today.' : 'Nothing collected yet today.'}</div>
+    </div>`;
+  } else {
+    const parts = [];
+    if (waiting.length) parts.push(`<span style="font-weight:600;color:var(--text)">${waiting.length}</span> awaiting pickup`);
+    if (awaitingReply.length) parts.push(`<span style="font-weight:600;color:var(--amber)">${awaitingReply.length}</span> pending member reply`);
+    if (actionNeeded.length) parts.push(`<span style="font-weight:600;color:var(--red)">${actionNeeded.length}</span> action needed`);
+    statusEl.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;font-size:13px;color:var(--text2);line-height:1.7">${parts.join(' · ')}</div>`;
   }
-  el.innerHTML = html || empty('ti-inbox','No packages awaiting pickup');
 }
 
 // ── ACTIONS ───────────────────────────────────────────────────────
 function renderActions() {
-  const pkgs = filteredPkgs().filter(p => p.status === 'pending-action');
-  document.getElementById('actions-list').innerHTML = pkgs.length ? pkgs.map(pkgCard).join('') : empty('ti-circle-check','No pending actions — all clear');
+  const all = filteredPkgs();
+  const urgent = all.filter(p => p.status === 'pending-action');
+  const manual = all.filter(p => p.status === 'awaiting-reply' && p.manualNotify);
+  const waiting = all.filter(p => p.status === 'awaiting-reply' && !p.manualNotify);
+  document.getElementById('actions-list-urgent').innerHTML = urgent.length
+    ? urgent.map(pkgCard).join('')
+    : `<div style="font-size:13px;color:var(--text3);padding:6px 0 8px">No items needing action right now.</div>`;
+  document.getElementById('actions-list-manual').innerHTML = manual.length
+    ? manual.map(pkgCard).join('')
+    : `<div style="font-size:13px;color:var(--text3);padding:6px 0 8px">No items requiring manual contact.</div>`;
+  document.getElementById('actions-list-waiting').innerHTML = waiting.length
+    ? waiting.map(pkgCard).join('')
+    : `<div style="font-size:13px;color:var(--text3);padding:6px 0 8px">No items awaiting member reply.</div>`;
 }
 
 // ── PACKAGES SEARCH & FILTER ──────────────────────────────────────
@@ -1295,6 +1410,101 @@ function renderPackages() {
 // ── HISTORY SEARCH & FILTER ───────────────────────────────────────
 let histSearchQuery = '';
 let histActiveFilter = 'all';
+let histDateRange = '7d';   // '7d' | '30d' | '90d' | 'all' | 'custom'
+let histDateFrom = null;    // Date object, for custom range
+let histDateTo = null;      // Date object, for custom range
+
+// Returns a Date representing midnight at the start of today
+function todayStart() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// Parse a package's stored date string or createdAt into a JS Date (best effort)
+function pkgDate(p) {
+  if (p.createdAt) return new Date(p.createdAt);
+  // Relative strings in demo data: "Today, 9:14 am" / "Yesterday, 3:22 pm"
+  const now = new Date();
+  const dateStr = p.date || '';
+  if (dateStr.startsWith('Today')) {
+    const match = dateStr.match(/(\d+):(\d+)\s*(am|pm)/i);
+    if (match) {
+      let h = parseInt(match[1]), m = parseInt(match[2]);
+      if (match[3].toLowerCase() === 'pm' && h !== 12) h += 12;
+      if (match[3].toLowerCase() === 'am' && h === 12) h = 0;
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m);
+    }
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0);
+  }
+  if (dateStr.startsWith('Yesterday')) {
+    const match = dateStr.match(/(\d+):(\d+)\s*(am|pm)/i);
+    if (match) {
+      let h = parseInt(match[1]), m = parseInt(match[2]);
+      if (match[3].toLowerCase() === 'pm' && h !== 12) h += 12;
+      if (match[3].toLowerCase() === 'am' && h === 12) h = 0;
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, h, m);
+    }
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12, 0);
+  }
+  // Fallback: try parsing directly
+  const parsed = Date.parse(dateStr);
+  return isNaN(parsed) ? new Date() : new Date(parsed);
+}
+
+// Filter packages by the current date range
+function applyDateRangeFilter(pkgs) {
+  if (histDateRange === 'all') return pkgs;
+  const today = todayStart();
+  if (histDateRange === 'custom') {
+    if (!histDateFrom && !histDateTo) return pkgs;
+    return pkgs.filter(p => {
+      const d = pkgDate(p);
+      if (histDateFrom && d < histDateFrom) return false;
+      if (histDateTo) {
+        const toEnd = new Date(histDateTo);
+        toEnd.setHours(23, 59, 59, 999);
+        if (d > toEnd) return false;
+      }
+      return true;
+    });
+  }
+  const days = histDateRange === '7d' ? 7 : histDateRange === '30d' ? 30 : 90;
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - (days - 1)); // include today
+  return pkgs.filter(p => pkgDate(p) >= cutoff);
+}
+
+function setHistDateRange(range, btn) {
+  histDateRange = range;
+  document.querySelectorAll('.date-range-row .date-chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  const wrap = document.getElementById('hist-custom-wrap');
+  if (range === 'custom') {
+    wrap.classList.add('show');
+    // Default custom range to last 7 days if not set
+    if (!histDateFrom && !histDateTo) {
+      const today = new Date();
+      const from = new Date(today);
+      from.setDate(from.getDate() - 6);
+      document.getElementById('hist-date-from').value = from.toISOString().slice(0,10);
+      document.getElementById('hist-date-to').value = today.toISOString().slice(0,10);
+      histDateFrom = from; histDateFrom.setHours(0,0,0,0);
+      histDateTo = today; histDateTo.setHours(0,0,0,0);
+    }
+  } else {
+    wrap.classList.remove('show');
+  }
+  renderHistory();
+}
+
+function applyCustomRange() {
+  const fromVal = document.getElementById('hist-date-from').value;
+  const toVal = document.getElementById('hist-date-to').value;
+  histDateFrom = fromVal ? new Date(fromVal + 'T00:00:00') : null;
+  histDateTo = toVal ? new Date(toVal + 'T00:00:00') : null;
+  renderHistory();
+}
 
 function onHistSearch(val) {
   histSearchQuery = val.trim().toLowerCase();
@@ -1326,12 +1536,15 @@ function hl(text, query) {
 function renderHistory() {
   let pkgs = filteredPkgs().filter(p => p.status === 'collected');
   const total = pkgs.length;
+  // Apply date range first
+  pkgs = applyDateRangeFilter(pkgs);
+  const afterDateFilter = pkgs.length;
   if (histActiveFilter === 'today') pkgs = pkgs.filter(p => p.date.startsWith('Today'));
   else if (histActiveFilter === 'letter') pkgs = pkgs.filter(p => p.mailType === 'letter');
   else if (histActiveFilter === 'package') pkgs = pkgs.filter(p => !p.mailType || p.mailType === 'package');
   else if (histActiveFilter === 'workspace') pkgs = pkgs.filter(p => p.category === 'workspace');
   else if (histActiveFilter === 'virtual') pkgs = pkgs.filter(p => p.category === 'virtual');
-  else if (histActiveFilter === 'action') pkgs = pkgs.filter(p => p.action);
+  else if (histActiveFilter === 'action') pkgs = pkgs.filter(p => p.timeline && p.timeline.some(e => e.title === 'Reply received'));
   if (histSearchQuery) {
     pkgs = pkgs.filter(p =>
       p.recipient.toLowerCase().includes(histSearchQuery) ||
@@ -1341,10 +1554,12 @@ function renderHistory() {
       (p.action||'').toLowerCase().includes(histSearchQuery)
     );
   }
+  const rangeLabel = { '7d':'Last 7 days', '30d':'Last 30 days', '90d':'Last 90 days', 'all':'All time', 'custom':'Custom range' }[histDateRange] || '';
   const meta = document.getElementById('hist-results-meta');
-  meta.textContent = histSearchQuery || histActiveFilter !== 'all'
-    ? `${pkgs.length} of ${total} collected`
-    : '';
+  const hasTypeFilter = histSearchQuery || histActiveFilter !== 'all';
+  meta.textContent = hasTypeFilter
+    ? `${pkgs.length} of ${afterDateFilter} · ${rangeLabel}`
+    : `${afterDateFilter} collected · ${rangeLabel}`;
   const el = document.getElementById('hist-list');
   if (!pkgs.length) {
     el.innerHTML = `<div class="empty"><i class="ti ${histSearchQuery ? 'ti-search' : 'ti-history'}"></i>${histSearchQuery ? 'No results for "' + histSearchQuery + '"' : 'No collected packages yet'}</div>`;
@@ -1686,15 +1901,28 @@ function showDetail(id) {
       </div>
     </div>`;
   } else if (p.status === 'awaiting-reply') {
-    extra = `<div style="background:var(--amber-bg);border:1px solid #FDE68A;border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
-      <i class="ti ti-clock" style="font-size:20px;color:var(--amber);flex-shrink:0"></i>
-      <div>
-        <div style="font-size:13px;font-weight:600;color:var(--amber-text)">Awaiting member reply</div>
-        <div style="font-size:12px;color:var(--amber-text);margin-top:2px">Notification sent to ${p.email || p.recipient}</div>
+    if (p.manualNotify) {
+      extra = `<div class="manual-notif-box">
+        <div class="manual-notif-box-title"><i class="ti ti-phone"></i>Manual notification — team to contact member</div>
+        <div style="font-size:12px;color:var(--amber-text);margin-bottom:10px">Auto-email was disabled. Contact ${p.recipient}${p.email ? ' (' + p.email + ')' : ''} directly, then mark as notified below.</div>
+        <button class="btn primary" style="width:100%;margin-bottom:8px" onclick="markManuallyNotified(${p.id})">
+          <i class="ti ti-check" style="font-size:15px;vertical-align:-2px;margin-right:5px"></i>Mark as manually notified
+        </button>
       </div>
-    </div>
-    <button class="btn secondary" onclick="simulateReply(${p.id},null)">Simulate member reply</button>
-    <button class="btn primary" style="margin-top:8px" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
+      <div style="background:var(--amber-bg);border:1px solid #FDE68A;border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--amber-text)">
+        Once notified, log the member's reply using the buttons that appear.
+      </div>`;
+    } else {
+      extra = `<div style="background:var(--amber-bg);border:1px solid #FDE68A;border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+        <i class="ti ti-clock" style="font-size:20px;color:var(--amber);flex-shrink:0"></i>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--amber-text)">Awaiting member reply</div>
+          <div style="font-size:12px;color:var(--amber-text);margin-top:2px">Notification sent to ${p.email || p.recipient}</div>
+        </div>
+      </div>
+      <button class="btn secondary" onclick="simulateReply(${p.id},null)">Simulate member reply</button>
+      <button class="btn primary" style="margin-top:8px" onclick="openSig(${p.id})"><i class="ti ti-writing" style="font-size:16px;vertical-align:-2px;margin-right:5px"></i>Collect with signature</button>`;
+    }
   } else if (p.status === 'waiting' && p.category === 'virtual') {
     extra = `<div style="margin-bottom:10px">
       <div class="section-label">Notification sent — Virtual Office</div>
@@ -1755,14 +1983,27 @@ async function markDone(id) {
   updateBadges(); goBack();
 }
 
+async function markManuallyNotified(id) {
+  const p = packages.find(x => x.id === id);
+  if (!p) return;
+  p.manualNotify = false; // member has now been contacted
+  const staff = currentUser?.name || 'Staff';
+  addTimelineEvent(p, 'Manually notified', `Member contacted directly by ${staff} — awaiting their instruction`, 'ti-phone-check', 'purple');
+  if (window.updatePackageInFirestore) await window.updatePackageInFirestore(p, { manualNotify: false, timeline: p.timeline });
+  showToast('Marked as notified — log member reply when received');
+  updateBadges();
+  showDetail(id);
+}
+
 async function simulateReply(id, action) {
   const p = packages.find(x => x.id === id);
   if (!p) return;
   const chosen = action || ACTION_LIST[Math.floor(Math.random() * ACTION_LIST.length)];
-  p.status = 'pending-action';
+  // 'Keep / Store onsite' means no team action needed — item is stored, member will collect
+  p.status = chosen === 'Keep / Store onsite' ? 'waiting' : 'pending-action';
   p.action = chosen;
   addTimelineEvent(p, 'Member replied', `${p.recipient} chose: ${chosen}`, ACTION_ICONS[chosen] || 'ti-message', 'amber');
-  if (window.updatePackageInFirestore) await window.updatePackageInFirestore(p, { status:'pending-action', action: chosen, timeline: p.timeline });
+  if (window.updatePackageInFirestore) await window.updatePackageInFirestore(p, { status: p.status, action: chosen, timeline: p.timeline });
   showToast('Member replied: ' + chosen);
   updateBadges();
   showDetail(id);
@@ -1806,14 +2047,35 @@ function sfSelect(id) {
 // ── FORM ──────────────────────────────────────────────────────────
 function onCategoryChange() {
   const cat = document.getElementById('f-category').value;
-  document.getElementById('vo-preview-wrap').style.display = cat === 'virtual' ? 'block' : 'none';
+  const isVO = cat === 'virtual';
+  document.getElementById('vo-preview-wrap').style.display = isVO ? 'block' : 'none';
+  // Notification toggle only relevant for incoming items; hide for FTM (they always get notified)
+  const toggleWrap = document.getElementById('notif-toggle-wrap');
+  if (toggleWrap) toggleWrap.style.display = isVO ? 'flex' : 'none';
+  // Reset toggle to on when category changes
+  const tog = document.getElementById('f-send-notif');
+  if (tog) { tog.checked = true; onNotifToggle(); }
   updateVoPreview();
+}
+
+function onNotifToggle() {
+  const on = document.getElementById('f-send-notif').checked;
+  const sub = document.getElementById('notif-toggle-sub');
+  if (sub) sub.textContent = on ? 'Member will be emailed automatically' : 'Team will contact member manually';
+  // Dim the email preview when notification is off
+  const preview = document.getElementById('vo-preview-wrap');
+  if (preview) preview.style.opacity = on ? '1' : '0.4';
 }
 
 function updateScanBoxLabel() {
   const type = document.getElementById('f-mail-type').value;
+  const isLetter = type === 'letter';
   const title = document.getElementById('scan-box-title');
-  if (title) title.textContent = type === 'letter' ? 'Scan letter barcode / QR code' : 'Scan package barcode';
+  if (title) title.textContent = isLetter ? 'Scan letter barcode / QR code' : 'Scan package barcode';
+  const carrierLabel = document.getElementById('f-sender-label');
+  if (carrierLabel) carrierLabel.innerHTML = isLetter
+    ? 'Carrier <span style="font-size:11px;color:var(--text3)">(optional)</span>'
+    : 'Carrier';
 }
 
 function updateVoPreview() {
@@ -2038,7 +2300,7 @@ async function stagePackage() {
   const storage = document.getElementById('f-storage').value.trim();
   const notes = document.getElementById('f-notes').value.trim();
   if (!recipient) { showToast('Please fill in recipient name'); return; }
-  if (!sender && !senderName) { showToast('Please fill in carrier or sender name'); return; }
+  if (!sender && !senderName && mailType !== 'letter') { showToast('Please fill in carrier or sender name'); return; }
 
   const now = new Date();
   const timeStr = 'Today, ' + now.toLocaleTimeString('en-AU', { hour:'numeric', minute:'2-digit', hour12:true }).toLowerCase();
@@ -2050,11 +2312,15 @@ async function stagePackage() {
   refParts.push(dateStr);
   const itemRef = refParts.join(' — ');
 
+  const sendNotif = category !== 'virtual' || (document.getElementById('f-send-notif')?.checked !== false);
+  const manualNotify = category === 'virtual' && !sendNotif;
+
   const staged = {
     id: nextId++, type, mailType, recipient, email, company:'', category,
     pkgLocation, sender, senderName, itemRef, tracking: tracking || (isLetter ? 'Letter — no tracking' : 'Manual entry'),
     storage, notes, date: timeStr,
     status: type === 'out' ? 'outgoing' : (category === 'virtual' ? 'awaiting-reply' : 'waiting'),
+    manualNotify,
     action: null, loggedBy: currentUser?.name || 'Staff', createdAt: now.toISOString(),
     timeline: []
   };
@@ -2066,7 +2332,9 @@ async function stagePackage() {
 
   // Record notification event
   if (type !== 'out') {
-    if (category === 'virtual') {
+    if (manualNotify) {
+      addTimelineEvent(staged, 'Notification skipped', `Team will contact ${recipient} manually — auto-email disabled`, 'ti-phone', 'amber');
+    } else if (category === 'virtual') {
       addTimelineEvent(staged, 'Notification sent', `Virtual Office email sent to ${email || recipient} — Ref: ${itemRef}`, 'ti-mail', 'purple');
     } else {
       addTimelineEvent(staged, 'Notification sent', `Arrival email sent to ${email || recipient}`, 'ti-mail', 'blue');
@@ -2238,6 +2506,7 @@ function showPage(name) {
   if (name !== 'detail') prevPage = name;
   if (name !== 'dashboard') clearDashSearch();
   document.getElementById('main-scroll').scrollTop = 0;
+  autoMoveToMailroom();
   if (name === 'dashboard') renderDashboard();
   if (name === 'actions') renderActions();
   if (name === 'packages') renderPackages();
